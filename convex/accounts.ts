@@ -149,7 +149,8 @@ export const list = adminQuery({
             ? []
             : (u.propertyIds ?? [])
                 .map((id) => names.get(id))
-                .filter((n): n is string => n !== undefined),
+                .filter((n): n is string => n !== undefined)
+                .sort((a, b) => a.localeCompare(b)),
         disabled: u.disabled === true,
         mustChangePassword: u.mustChangePassword === true,
         ssoManaged: u.ssoManaged === true,

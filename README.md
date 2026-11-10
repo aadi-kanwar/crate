@@ -39,6 +39,43 @@ own Convex project**, Tailwind 4 with MealSync's tokens and components
   property switcher at the top of their screens.
 - Every permission is checked in the backend, not just on screen.
 
+## Master lists (organisation-wide; **Lists** screen)
+
+- **Categories:** start with Grocery, Fruits & Vegetables, Dairy, Kitchen
+  Supplies, Utility (LPG). Admins add, rename, reorder and archive them.
+- **Items:** name, category, the unit it's counted in (kg, litre, piece,
+  dozen, cylinder; fixed once bought), other names in any language (search
+  matches them: "tamatar" finds Tomato), optional pack sizes ("500 ml
+  packet" = 0.5 litre) and variants ("Toned", "Aashirvaad").
+- **Shops:** name, type (Wholesaler, Kirana, Mandi / Vendor, Dairy, LPG
+  agency, Other) and an optional area or note.
+- Managers and kitchen staff can add an item or shop while entering; it is
+  **unverified** and waits under **To check**, where an admin verifies, edits
+  or **merges** it into the item/shop it duplicates (every purchase moves
+  over, the duplicate's name becomes an "other name", then it is removed).
+- Archived items and shops are hidden when entering but keep their history.
+
+## Purchase entries
+
+- An entry is one trip to one shop with one or more items. It's for a
+  property (the one chosen at the top) or, when ticked, **Shared** (bought
+  for the whole organisation; never split across properties).
+- Each line: item, optional variant, quantity (directly, or as "4 × 500 ml
+  packet"), and the total paid. Crate works out and stores the price per
+  unit.
+- **Price check:** before saving, each line's price per unit is compared
+  with the median of that item's last 5 purchases (same variant if chosen).
+  More than double or under half shows "Did you mean…?"; the person must
+  tick "Yes, this price is right" or go back and fix it. The backend refuses
+  unconfirmed unusual prices too.
+- The date and time are set when saving. Only an admin can change them.
+- Managers and kitchen staff see entries for their properties (and their
+  own Shared entries), and can edit or delete them for **24 hours**; after
+  that they are locked and only an admin can change them. Deleting keeps
+  the record (admins still see it).
+- Every create, edit and delete is in the **Audit log** with before and
+  after values.
+
 ## Security rules in the code
 
 - Every backend function is built from the permission wrappers in

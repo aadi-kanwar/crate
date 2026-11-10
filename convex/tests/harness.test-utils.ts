@@ -126,3 +126,47 @@ export async function errorCode(promise: Promise<unknown>): Promise<string> {
     return `UNEXPECTED: ${(error as Error).message}`;
   }
 }
+
+/** The organisation's first category (Grocery). */
+export async function firstCategory(t: T, admin: Admin) {
+  return await t.run(async (ctx) =>
+    (await ctx.db
+      .query("categories")
+      .withIndex("by_org_order", (q) => q.eq("organizationId", admin.organizationId))
+      .first())!._id,
+  );
+}
+
+/** A verified item, added by the admin. */
+export async function createItem(
+  t: T,
+  admin: Admin,
+  details: Partial<{
+    name: string;
+    baseUnit: "kg" | "litre" | "piece" | "dozen" | "cylinder";
+    aliases: string[];
+    packSizes: { label: string; quantity: number }[];
+    variants: string[];
+  }> = {},
+) {
+  return await admin.as.mutation(api.catalog.createItem, {
+    name: details.name ?? "Tomato",
+    categoryId: await firstCategory(t, admin),
+    baseUnit: details.baseUnit ?? "kg",
+    aliases: details.aliases ?? [],
+    packSizes: details.packSizes ?? [],
+    variants: details.variants ?? [],
+  });
+}
+
+/** A verified shop, added by the admin. */
+export async function createShop(t: T, admin: Admin, name = "Sharma Kirana") {
+  return await admin.as.mutation(api.catalog.createShop, { name, type: "kirana" });
+}
+
+/** Moves "now" forward by `ms` (fake timers). */
+export function advance(ms: number) {
+  vi.setSystemTime(new Date(Date.now() + ms));
+}
+
+export const HOUR = 60 * 60 * 1000;

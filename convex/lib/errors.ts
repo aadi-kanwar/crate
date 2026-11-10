@@ -2,7 +2,7 @@ import { ConvexError } from "convex/values";
 
 /**
  * Error codes the browser can recognise. Messages are written for admins
- * and staff, never for programmers, and never reveal private details.
+ * and kitchen teams, never for programmers, and never reveal private details.
  */
 export type AppErrorCode =
   | "NOT_SIGNED_IN"
@@ -18,7 +18,9 @@ export type AppErrorCode =
   | "WEAK_PASSWORD"
   | "INVALID_DATE"
   | "ORG_REQUIRED"
-  | "SSO_LINK_EXPIRED";
+  | "SSO_LINK_EXPIRED"
+  | "EDIT_WINDOW_CLOSED"
+  | "PRICE_CHECK_NEEDED";
 
 export type AppErrorData = { code: AppErrorCode; message: string };
 
@@ -40,6 +42,10 @@ export const DEFAULT_MESSAGES: Record<AppErrorCode, string> = {
   ORG_REQUIRED: "Set up your organisation first.",
   // Deliberately the same for every Admin Hub sign-in failure: never say why.
   SSO_LINK_EXPIRED: "This link has expired. Open it again from the Admin Hub.",
+  EDIT_WINDOW_CLOSED:
+    "This entry is more than 24 hours old, so only an admin can change it now.",
+  PRICE_CHECK_NEEDED:
+    "Some prices look unusual. Please check them and confirm before saving.",
 };
 
 export function appError(
