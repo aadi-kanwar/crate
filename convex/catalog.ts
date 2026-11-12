@@ -461,6 +461,47 @@ export const moveCategory = adminMutation({
   },
 });
 
+/**
+ * Saves a new order for the main categories (no `parentId`) or for the
+ * sub-categories of one main category, after a drag and drop. `orderedIds`
+ * must be exactly those siblings.
+ */
+export const reorderCategories = adminMutation({
+  args: { parentId: v.optional(v.id("categories")), orderedIds: v.array(v.id("categories")) },
+  handler: async (ctx, args) => {
+    const organizationId = ctx.admin.organization._id;
+    if (args.parentId) await loadCategory(ctx, organizationId, args.parentId);
+    const siblings = (await categoriesOf(ctx, organizationId))
+      .filter((c) => c.parentId === args.parentId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const wanted = new Set<string>(args.orderedIds);
+    if (wanted.size !== args.orderedIds.length || wanted.size !== siblings.length || siblings.some((c) => !wanted.has(c._id)))
+      throw appError("CONFLICT", "The categories changed meanwhile. Please try again.");
+    const before = siblings.map((c) => c.name);
+    let changed = false;
+    for (const [position, id] of args.orderedIds.entries()) {
+      const row = siblings.find((c) => c._id === id)!;
+      if (row.sortOrder !== position) {
+        await ctx.db.patch(id, { sortOrder: position });
+        changed = true;
+      }
+    }
+    if (!changed) return null;
+    await writeAudit(ctx, {
+      organizationId,
+      actorUserId: ctx.admin.userId,
+      action: "category.updated",
+      entityType: "categories",
+      entityId: args.parentId ?? "main",
+      metadata: {
+        before: { order: before },
+        after: { order: args.orderedIds.map((id) => siblings.find((c) => c._id === id)!.name) },
+      },
+    });
+    return null;
+  },
+});
+
 // ---- Items ------------------------------------------------------------------
 
 const vItemFields = {
