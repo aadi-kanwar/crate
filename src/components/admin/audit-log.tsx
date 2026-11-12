@@ -126,12 +126,6 @@ export function AuditLog() {
                   {row.actorName ?? "System"}
                   {summary(row.action, row.metadata) ? ` · ${summary(row.action, row.metadata)}` : ""}
                 </span>
-                {row.metadata ? (
-                  <details className="text-xs text-foreground-secondary">
-                    <summary className="cursor-pointer select-none">Full details</summary>
-                    <pre className="mt-2 overflow-x-auto rounded-md bg-subtle p-3 font-mono whitespace-pre-wrap">{JSON.stringify(row.metadata, null, 2)}</pre>
-                  </details>
-                ) : null}
               </li>
             ))}
           </ul>

@@ -6,7 +6,7 @@ import { Check, Circle, CircleCheck, Plus, Store, Trash2, TriangleAlert, Undo2 }
 import { useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { rupeesToPaise, tidyQuantity, unitPricePaise, type PriceCheck } from "@convex/lib/purchases";
+import { rupeesToPaise, tidyQuantity, type PriceCheck } from "@convex/lib/purchases";
 import type { PackSize } from "@convex/lib/validators";
 import { Chips, type Scope } from "@/components/entry/entry-form";
 import { ItemPicker, type Catalog, type CatalogItem } from "@/components/entry/pickers";
@@ -609,10 +609,12 @@ function TickDialog({ row, catalog, onClose }: { row: Row; catalog: Catalog; onC
   const start = row.bought ?? row;
   const amount = useAmount(item, start);
   const [shopId, setShopId] = useState<string>(row.bought?.shopId ?? row.shopId ?? "");
-  const [totalText, setTotalText] = useState(row.bought ? String(row.bought.totalPaise / 100) : "");
+  // The price is asked per unit (per kg, per litre…); the total is worked out from the quantity.
+  const [priceText, setPriceText] = useState(row.bought ? String(row.bought.unitPricePaise / 100) : "");
   const [busy, setBusy] = useState(false);
-  const totalPaise = rupeesToPaise(totalText);
-  const unit = amount.quantity !== null && totalPaise ? unitPricePaise(totalPaise, amount.quantity) : null;
+  const pricePaise = rupeesToPaise(priceText);
+  const totalPaise = amount.quantity !== null && pricePaise ? Math.round(pricePaise * amount.quantity) : null;
+  const unitName = UNIT_LABEL[row.baseUnit].one;
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
@@ -625,7 +627,8 @@ function TickDialog({ row, catalog, onClose }: { row: Row; catalog: Catalog; onC
           onSubmit={async (e) => {
             e.preventDefault();
             if (amount.quantity === null) return toast.error("Enter how much was bought.");
-            if (!totalPaise) return toast.error("Enter the amount paid.");
+            if (!pricePaise) return toast.error(`Enter the price per ${unitName}.`);
+            if (!totalPaise) return toast.error("The total comes to zero. Check the quantity and price.");
             if (!shopId) return toast.error("Choose the shop.");
             setBusy(true);
             try {
@@ -638,22 +641,28 @@ function TickDialog({ row, catalog, onClose }: { row: Row; catalog: Catalog; onC
           }}
         >
           {amount.fields("tick")}
-          <Field id="tick-total" label="Total paid (₹)">
+          <Field id="tick-price" label={`Price per ${unitName} (₹)`}>
             {(p) => (
               <Input
                 {...p}
                 autoFocus
                 inputMode="decimal"
                 className="tabular text-lg"
-                placeholder={row.estimatePaise !== null ? `about ${(row.estimatePaise / 100).toFixed(0)}` : undefined}
-                value={totalText}
-                onChange={(e) => setTotalText(e.target.value)}
+                placeholder={row.estimateUnitPricePaise !== null ? `about ${(row.estimateUnitPricePaise / 100).toFixed(0)}` : undefined}
+                value={priceText}
+                onChange={(e) => setPriceText(e.target.value)}
               />
             )}
           </Field>
           <p className="tabular text-sm text-foreground-secondary" aria-live="polite">
             {amount.quantity !== null ? formatQuantity(amount.quantity, row.baseUnit) : "—"}
-            {unit !== null ? ` · ${formatUnitPrice(unit, row.baseUnit)}` : ""}
+            {pricePaise ? ` × ${formatUnitPrice(pricePaise, row.baseUnit)}` : ""}
+            {totalPaise ? (
+              <>
+                {" = "}
+                <span className="font-semibold text-foreground">{formatPaise(totalPaise)}</span>
+              </>
+            ) : null}
           </p>
           <ShopSelect id="tick-shop" label="Bought at" catalog={catalog} value={shopId} onChange={setShopId} allowNone={false} extra={row.bought ? { shopId: row.bought.shopId, name: row.bought.shopName } : null} />
           <DialogFooter>

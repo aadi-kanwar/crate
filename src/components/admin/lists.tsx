@@ -8,6 +8,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { matchesSearch } from "@convex/lib/purchases";
 import { BASE_UNITS, SHOP_TYPES, type BaseUnit, type ShopType } from "@convex/lib/validators";
+import { CategorySelect } from "@/components/app/category-select";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
@@ -130,14 +131,7 @@ function ItemsTab({ lists }: { lists: Lists }) {
     <>
       <FilterBar>
         <SearchInput label="Search items" placeholder="Name or other name" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <NativeSelect aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="sm:w-56">
-          <option value="">All categories</option>
-          {lists.categories.map((c) => (
-            <option key={c.categoryId} value={c.categoryId}>
-              {c.label}
-            </option>
-          ))}
-        </NativeSelect>
+        <CategorySelect categories={lists.categories} value={categoryId} onChange={setCategoryId} idPrefix="items-filter" mode="filter" />
         <label className="flex min-h-11 items-center gap-2 text-sm">
           <input type="checkbox" className="size-5 accent-primary" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
@@ -317,18 +311,15 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
           <Field id="item-name" label="Name">
             {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} required />}
           </Field>
+          <CategorySelect
+            categories={liveCategories}
+            value={categoryId}
+            onChange={(id) => setCategoryId(id as Id<"categories">)}
+            idPrefix="item"
+            mode="form"
+            className="grid grid-cols-2 gap-3"
+          />
           <div className="grid grid-cols-2 gap-3">
-            <Field id="item-category" label="Category">
-              {(p) => (
-                <NativeSelect {...p} value={categoryId} onChange={(e) => setCategoryId(e.target.value as Id<"categories">)}>
-                  {liveCategories.map((c) => (
-                    <option key={c.categoryId} value={c.categoryId}>
-                      {c.label}
-                    </option>
-                  ))}
-                </NativeSelect>
-              )}
-            </Field>
             <Field id="item-unit" label="Counted in" hint={item && item.lineCount > 0 ? "Fixed once bought." : undefined}>
               {(p) => (
                 <NativeSelect
