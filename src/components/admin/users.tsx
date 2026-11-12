@@ -86,7 +86,7 @@ export function UsersList() {
                   : ` · ${a.propertyNames.join(", ") || "no property"}`}
               </span>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-nowrap gap-2">
               <AccountDialog account={a} />
               {a.isYou ? null : (
                 <>
@@ -436,9 +436,10 @@ function DisableDialog({ account }: { account: Account }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost">
+        <Button variant="ghost" aria-label={turningOff ? `Switch off ${account.name}` : `Switch on ${account.name}`} className="px-3 sm:px-5">
           <Icon icon={Power} />
-          {turningOff ? "Switch off" : "Switch on"}
+          {/* Icon only on phones, so the buttons stay on one line. */}
+          <span className="hidden sm:inline">{turningOff ? "Switch off" : "Switch on"}</span>
         </Button>
       </DialogTrigger>
       <DialogContent

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
-import { FilterBar, SearchInput } from "@/components/ui/filter-bar";
+import { SearchInput } from "@/components/ui/filter-bar";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -44,6 +44,7 @@ export function MasterLists() {
       <SegmentedTabs<Tab>
         label="Lists"
         idPrefix="lists"
+        className="grid grid-cols-2 sm:flex"
         value={tab}
         onChange={setTab}
         items={[
@@ -129,17 +130,23 @@ function ItemsTab({ lists }: { lists: Lists }) {
   );
   return (
     <>
-      <FilterBar>
-        <SearchInput label="Search items" placeholder="Name or other name" value={query} onChange={(e) => setQuery(e.target.value)} />
+      {/* The button has its own row, so filters appearing or disappearing never move it. */}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-foreground-secondary" aria-live="polite">
+          {items.length === lists.items.length ? `${items.length} items` : `${items.length} of ${lists.items.length} items`}
+        </p>
+        <ItemDialog lists={lists} />
+      </div>
+      <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Filters">
+        <Field id="items-search" label="Search">
+          {(p) => <Input {...p} type="search" placeholder="Name or other name" value={query} onChange={(e) => setQuery(e.target.value)} />}
+        </Field>
         <CategorySelect categories={lists.categories} value={categoryId} onChange={setCategoryId} idPrefix="items-filter" mode="filter" />
         <label className="flex min-h-11 items-center gap-2 text-sm">
           <input type="checkbox" className="size-5 accent-primary" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
-        <div className="sm:ml-auto">
-          <ItemDialog lists={lists} />
-        </div>
-      </FilterBar>
+      </div>
       {items.length === 0 ? <EmptyState title="No items" description="Add items here, or your team adds them while entering." /> : <ItemRows items={items} lists={lists} />}
     </>
   );
@@ -515,16 +522,21 @@ function ShopsTab({ lists }: { lists: Lists }) {
   const shops = lists.shops.filter((s) => (showArchived || !s.archived) && matchesSearch(query, s.name, s.note ? [s.note] : []));
   return (
     <>
-      <FilterBar>
-        <SearchInput label="Search shops" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-foreground-secondary" aria-live="polite">
+          {shops.length === lists.shops.length ? `${shops.length} shops` : `${shops.length} of ${lists.shops.length} shops`}
+        </p>
+        <ShopDialog />
+      </div>
+      <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Filters">
+        <Field id="shops-search" label="Search">
+          {(p) => <Input {...p} type="search" placeholder="Shop name or area" value={query} onChange={(e) => setQuery(e.target.value)} />}
+        </Field>
         <label className="flex min-h-11 items-center gap-2 text-sm">
           <input type="checkbox" className="size-5 accent-primary" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
-        <div className="sm:ml-auto">
-          <ShopDialog />
-        </div>
-      </FilterBar>
+      </div>
       {shops.length === 0 ? <EmptyState title="No shops" /> : <ShopRows shops={shops} lists={lists} />}
     </>
   );

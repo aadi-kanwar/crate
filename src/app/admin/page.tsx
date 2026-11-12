@@ -1,16 +1,16 @@
 "use client";
 
 import { useMutation } from "convex/react";
-import { Download } from "lucide-react";
+import { Download, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { DateRangeSelect, ScopeSelect, useDateRange, useHistoryScope } from "@/components/admin/history-filters";
+import { CategorySelect } from "@/components/app/category-select";
 import { EntryList } from "@/components/entry/entry-list";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
-import { FilterBar } from "@/components/ui/filter-bar";
 import { Icon } from "@/components/ui/icon";
 import { NativeSelect } from "@/components/ui/native-select";
 import { PageHeader } from "@/components/ui/page-header";
@@ -32,6 +32,7 @@ export default function EntriesLogPage() {
   const [itemId, setItemId] = useState("");
   const [enteredBy, setEnteredBy] = useState("");
   const lists = useQuery(api.catalog.lists, {});
+  const [moreFilters, setMoreFilters] = useState(false);
   const people = useQuery(api.accounts.list, {});
   const filters = {
     scope: scope.value,
@@ -50,6 +51,7 @@ export default function EntriesLogPage() {
   const exportCsv = useMutation(api.history.exportCsv);
   const [downloading, setDownloading] = useState(false);
   const partial = Boolean(categoryId || shopId || itemId);
+  const activeFilters = [categoryId, shopId, itemId, enteredBy].filter(Boolean).length;
 
   return (
     <>
@@ -83,67 +85,78 @@ export default function EntriesLogPage() {
           </Button>
         }
       />
-      <FilterBar>
-        <ScopeSelect scope={scope} />
-        <DateRangeSelect dates={dates} presets={["this_month", "last_30", "last_3m", "last_12m", "custom"]} />
-        <Field id="category" label="Category">
-          {(p) => (
-            <NativeSelect {...p} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">All</option>
-              {lists?.categories.map((c) => (
-                <option key={c.categoryId} value={c.categoryId}>
-                  {c.name}
-                </option>
-              ))}
-            </NativeSelect>
-          )}
-        </Field>
-        <Field id="shop" label="Shop">
-          {(p) => (
-            <NativeSelect {...p} value={shopId} onChange={(e) => setShopId(e.target.value)}>
-              <option value="">All</option>
-              {lists?.shops.map((s) => (
-                <option key={s.shopId} value={s.shopId}>
-                  {s.name}
-                </option>
-              ))}
-            </NativeSelect>
-          )}
-        </Field>
-        <Field id="item" label="Item">
-          {(p) => (
-            <NativeSelect {...p} value={itemId} onChange={(e) => setItemId(e.target.value)}>
-              <option value="">All</option>
-              {lists?.items.map((i) => (
-                <option key={i.itemId} value={i.itemId}>
-                  {i.name}
-                </option>
-              ))}
-            </NativeSelect>
-          )}
-        </Field>
-        <Field id="entered-by" label="Entered by">
-          {(p) => (
-            <NativeSelect {...p} value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)}>
-              <option value="">Anyone</option>
-              {people?.map((u) => (
-                <option key={u.userId} value={u.userId}>
-                  {u.name}
-                </option>
-              ))}
-            </NativeSelect>
-          )}
-        </Field>
-      </FilterBar>
+      <div className="flex flex-col gap-3" role="group" aria-label="Filters">
+        <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <ScopeSelect scope={scope} />
+          <DateRangeSelect dates={dates} presets={["this_month", "last_30", "last_3m", "last_12m", "custom"]} />
+        </div>
+        {/* On phones the less-used filters fold away behind a button. */}
+        <Button
+          variant="secondary"
+          className="self-start sm:hidden"
+          aria-expanded={moreFilters}
+          aria-controls="more-filters"
+          onClick={() => setMoreFilters(!moreFilters)}
+        >
+          <Icon icon={SlidersHorizontal} />
+          {moreFilters ? "Fewer filters" : "More filters"}
+          {activeFilters > 0 ? ` (${activeFilters} on)` : ""}
+        </Button>
+        <div id="more-filters" className={cn("grid-cols-1 items-end gap-3 sm:grid sm:grid-cols-2 xl:grid-cols-4", moreFilters ? "grid" : "hidden")}>
+          <CategorySelect categories={lists?.categories ?? []} value={categoryId} onChange={setCategoryId} idPrefix="log" mode="filter" />
+          <Field id="shop" label="Shop">
+            {(p) => (
+              <NativeSelect {...p} value={shopId} onChange={(e) => setShopId(e.target.value)}>
+                <option value="">All</option>
+                {lists?.shops.map((s) => (
+                  <option key={s.shopId} value={s.shopId}>
+                    {s.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
+          <Field id="item" label="Item">
+            {(p) => (
+              <NativeSelect {...p} value={itemId} onChange={(e) => setItemId(e.target.value)}>
+                <option value="">All</option>
+                {lists?.items.map((i) => (
+                  <option key={i.itemId} value={i.itemId}>
+                    {i.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
+          <Field id="entered-by" label="Entered by">
+            {(p) => (
+              <NativeSelect {...p} value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)}>
+                <option value="">Anyone</option>
+                {people?.map((u) => (
+                  <option key={u.userId} value={u.userId}>
+                    {u.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
+        </div>
+      </div>
 
       {shown === undefined ? (
         <LoadingState rows={5} />
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", loading && "opacity-60")}>
-          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {/* Phones: the two counts share a row, the total gets its own. */}
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Stat label="Entries" value={shown.totals.entries.toLocaleString("en-IN")} />
             <Stat label={partial ? "Matching items bought" : "Items bought"} value={shown.totals.lines.toLocaleString("en-IN")} />
-            <Stat label={partial ? "Spent on matching items" : "Total spent"} value={formatPaise(shown.totals.totalPaise)} emphasis />
+            <Stat
+              label={partial ? "Spent on matching items" : "Total spent"}
+              value={formatPaise(shown.totals.totalPaise)}
+              emphasis
+              className="col-span-2 sm:col-span-1"
+            />
           </dl>
           {shown.truncated ? (
             <Banner tone="info">Showing the latest 300 entries. The totals and the download include all {shown.totals.entries}.</Banner>
