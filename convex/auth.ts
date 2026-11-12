@@ -44,6 +44,26 @@ const PhonePassword = ConvexCredentials<DataModel>({
   crypto: passwordCrypto,
 });
 
+export const HUB_SSO_PROVIDER = "hub-sso";
+
+/**
+ * Admin Hub single sign-on (master admins only), as in the Staff app. The
+ * /sso page calls `signIn("hub-sso", { ticket })` with the one-time ticket
+ * the hub signed. Any failure gives the same SSO_LINK_EXPIRED message, never
+ * the reason. The login it opens lasts 12 hours (see convex/sso.ts).
+ */
+const HubSso = ConvexCredentials<DataModel>({
+  id: HUB_SSO_PROVIDER,
+  authorize: async (params, ctx) => {
+    const ticket = typeof params.ticket === "string" ? params.ticket : "";
+    const claims = await ctx.runAction(internal.ssoNode.verifyTicket, { ticket });
+    if (claims === null) throw appError("SSO_LINK_EXPIRED");
+    const result = await ctx.runMutation(internal.sso.acceptTicket, claims);
+    if (result === null) throw appError("SSO_LINK_EXPIRED");
+    return result;
+  },
+});
+
 async function signInExisting(ctx: ActionCtx, phone: string, password: string) {
   if (password.length === 0) throw appError("SIGN_IN_FAILED");
   let userId;
@@ -70,7 +90,7 @@ async function signInExisting(ctx: ActionCtx, phone: string, password: string) {
 }
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [PhonePassword],
+  providers: [PhonePassword, HubSso],
   signIn: {
     // Convex Auth's own per-account limit, kept above ours so ours applies first.
     maxFailedAttempsPerHour: FAILED_ATTEMPTS_LIMIT * 4 + 10,

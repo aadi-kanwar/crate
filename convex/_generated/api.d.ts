@@ -14,6 +14,7 @@ import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as authLimits from "../authLimits.js";
 import type * as catalog from "../catalog.js";
+import type * as crons from "../crons.js";
 import type * as entries from "../entries.js";
 import type * as history from "../history.js";
 import type * as http from "../http.js";
@@ -26,10 +27,13 @@ import type * as lib_history from "../lib/history.js";
 import type * as lib_inputRules from "../lib/inputRules.js";
 import type * as lib_money from "../lib/money.js";
 import type * as lib_purchases from "../lib/purchases.js";
+import type * as lib_ssoTicket from "../lib/ssoTicket.js";
 import type * as lib_time from "../lib/time.js";
 import type * as lib_validators from "../lib/validators.js";
 import type * as organization from "../organization.js";
 import type * as setup from "../setup.js";
+import type * as sso from "../sso.js";
+import type * as ssoNode from "../ssoNode.js";
 import type * as users from "../users.js";
 
 import type {
@@ -45,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authLimits: typeof authLimits;
   catalog: typeof catalog;
+  crons: typeof crons;
   entries: typeof entries;
   history: typeof history;
   http: typeof http;
@@ -57,10 +62,13 @@ declare const fullApi: ApiFromModules<{
   "lib/inputRules": typeof lib_inputRules;
   "lib/money": typeof lib_money;
   "lib/purchases": typeof lib_purchases;
+  "lib/ssoTicket": typeof lib_ssoTicket;
   "lib/time": typeof lib_time;
   "lib/validators": typeof lib_validators;
   organization: typeof organization;
   setup: typeof setup;
+  sso: typeof sso;
+  ssoNode: typeof ssoNode;
   users: typeof users;
 }>;
 
