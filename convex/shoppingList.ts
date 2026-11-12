@@ -90,13 +90,13 @@ async function rowsOf(ctx: Db, organizationId: Id<"organizations">, scopeKey: st
 
 /** The item's recent purchases, newest first (for price estimates). */
 async function priceHistory(ctx: Db, itemId: Id<"items">) {
-  const out: { shopId: string; variant?: string; unitPricePaise: number }[] = [];
+  const out: { shopId: string; variant?: string; unitPricePaise: number; loggedAt: number }[] = [];
   for await (const line of ctx.db
     .query("entryLines")
     .withIndex("by_item_loggedAt", (q) => q.eq("itemId", itemId))
     .order("desc")) {
     if (line.deleted) continue;
-    out.push({ shopId: line.shopId, variant: line.variant, unitPricePaise: line.unitPricePaise });
+    out.push({ shopId: line.shopId, variant: line.variant, unitPricePaise: line.unitPricePaise, loggedAt: line.loggedAt });
     if (out.length >= PRICE_HISTORY) break;
   }
   return out;
@@ -129,10 +129,13 @@ export const get = memberQuery({
       (await rowsOf(ctx, organizationId, scopeKey)).map(async (row) => {
         const item = (await ctx.db.get(row.itemId))!;
         const top = categories.find((c) => c._id === item.categoryId);
+        const history = await priceHistory(ctx, row.itemId);
         const expected = expectedUnitPrice(
           { variant: row.variant, shopId: row.shopId, expectedUnitPricePaise: row.expectedUnitPricePaise },
-          await priceHistory(ctx, row.itemId),
+          history,
         );
+        // The most recent purchase (same variant when one is set), from any entry: typed in, or saved from a list.
+        const last = (row.variant ? history.find((h) => h.variant === row.variant) : undefined) ?? history[0];
         return {
           rowId: row._id,
           itemId: row.itemId,
@@ -156,6 +159,14 @@ export const get = memberQuery({
           estimateUnitPricePaise: expected?.unitPricePaise ?? null,
           estimateSource: expected?.source ?? null,
           estimatePaise: expected ? Math.round(row.quantity * expected.unitPricePaise) : null,
+          lastPurchase: last
+            ? {
+                unitPricePaise: last.unitPricePaise,
+                shopName: (await shopName(last.shopId as Id<"shops">)) ?? "",
+                loggedAt: last.loggedAt,
+                variant: last.variant ?? null,
+              }
+            : null,
           bought: row.bought
             ? {
                 quantity: row.bought.quantity,

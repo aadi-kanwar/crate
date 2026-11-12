@@ -67,3 +67,9 @@ export function formatWhen(ms: number, nowMs = Date.now()): string {
   if (day === yesterday) return `Yesterday, ${time}`;
   return `${formatInTimeZone(new Date(ms), TIMEZONE, day.slice(0, 4) === today.slice(0, 4) ? "EEE, d MMM" : "d MMM yyyy")}, ${time}`;
 }
+
+/** "3 Nov" (this year) or "3 Nov 2025", India time. */
+export function formatShortDate(ms: number, nowMs = Date.now()): string {
+  const sameYear = formatInTimeZone(new Date(ms), TIMEZONE, "yyyy") === formatInTimeZone(new Date(nowMs), TIMEZONE, "yyyy");
+  return formatInTimeZone(new Date(ms), TIMEZONE, sameYear ? "d MMM" : "d MMM yyyy");
+}

@@ -733,6 +733,7 @@ function CategoriesTab({ lists }: { lists: Lists }) {
                   <span className="text-sm text-foreground-secondary">
                     {c.parentId ? "Sub-category · " : ""}
                     {c.itemCount} {c.itemCount === 1 ? "item" : "items"}
+                    {c.subcategoryItemCount > 0 ? `, ${c.subcategoryItemCount} of them in sub-categories` : ""}
                   </span>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
