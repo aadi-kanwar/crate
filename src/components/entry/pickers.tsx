@@ -8,6 +8,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { matchesSearch } from "@convex/lib/purchases";
 import { BASE_UNITS, SHOP_TYPES, type BaseUnit, type ShopType } from "@convex/lib/validators";
+import { CategorySelect } from "@/components/app/category-select";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
@@ -184,17 +185,14 @@ function NewItemForm({
       <Field id="new-item-alias" label="Other name (optional)" hint="What you call it, in any language, e.g. tamatar.">
         {(p) => <Input {...p} value={alias} onChange={(e) => setAlias(e.target.value)} />}
       </Field>
-      <Field id="new-item-category" label="Category">
-        {(p) => (
-          <NativeSelect {...p} value={categoryId} onChange={(e) => setCategoryId(e.target.value as Id<"categories">)}>
-            {catalog.categories.map((c) => (
-              <option key={c.categoryId} value={c.categoryId}>
-                {c.label}
-              </option>
-            ))}
-          </NativeSelect>
-        )}
-      </Field>
+      <CategorySelect
+        categories={catalog.categories}
+        value={categoryId}
+        onChange={(id) => setCategoryId(id as Id<"categories">)}
+        idPrefix="new-item"
+        mode="form"
+        className="grid grid-cols-2 gap-3"
+      />
       <Field id="new-item-unit" label="Counted in" hint="Every purchase of this item is entered in this unit.">
         {(p) => (
           <NativeSelect {...p} value={baseUnit} onChange={(e) => setBaseUnit(e.target.value as BaseUnit)}>
