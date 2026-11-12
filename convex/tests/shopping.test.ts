@@ -274,3 +274,26 @@ describe("last price in Buy mode", () => {
     expect(rows.find((r) => r.rowId === milkRow)!.lastPurchase).toMatchObject({ unitPricePaise: 5_400, variant: "Toned" });
   });
 });
+
+describe("reordering categories by drag and drop", () => {
+  test("saves the new order among siblings only, and is audited", async () => {
+    const c = await setup();
+    const before = (await c.admin.as.query(api.catalog.lists, {})).categories.filter((x) => x.parentId === null);
+    const reversed = [...before].reverse().map((x) => x.categoryId);
+    await c.admin.as.mutation(api.catalog.reorderCategories, { orderedIds: reversed });
+    const after = (await c.admin.as.query(api.catalog.lists, {})).categories.filter((x) => x.parentId === null);
+    expect(after.map((x) => x.categoryId)).toEqual(reversed);
+    // Sub-categories are ordered within their own category.
+    const grocery = before[0].categoryId;
+    const a = await c.admin.as.mutation(api.catalog.addCategory, { name: "A", parentId: grocery });
+    const b = await c.admin.as.mutation(api.catalog.addCategory, { name: "B", parentId: grocery });
+    await c.admin.as.mutation(api.catalog.reorderCategories, { parentId: grocery, orderedIds: [b, a] });
+    const subs = (await c.admin.as.query(api.catalog.lists, {})).categories.filter((x) => x.parentId === grocery);
+    expect(subs.map((x) => x.name)).toEqual(["B", "A"]);
+    // A list that isn't exactly the siblings is refused.
+    expect(await errorCode(c.admin.as.mutation(api.catalog.reorderCategories, { orderedIds: [a, ...reversed] }))).toBe("CONFLICT");
+    expect(await errorCode(c.member.as.mutation(api.catalog.reorderCategories, { orderedIds: reversed }))).toBe("FORBIDDEN");
+    const audit = (await c.t.run((ctx) => ctx.db.query("auditLog").collect())).filter((x) => x.action === "category.updated");
+    expect(audit.length).toBeGreaterThanOrEqual(2);
+  });
+});

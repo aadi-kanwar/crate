@@ -2,13 +2,14 @@
 
 import { useMutation } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { Archive, ArrowDown, ArrowUp, BadgeCheck, CircleHelp, GitMerge, Pencil, Plus, X } from "lucide-react";
+import { Archive, BadgeCheck, CircleHelp, GitMerge, Pencil, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { matchesSearch } from "@convex/lib/purchases";
 import { BASE_UNITS, SHOP_TYPES, type BaseUnit, type ShopType } from "@convex/lib/validators";
 import { CategorySelect } from "@/components/app/category-select";
+import { CategoryTree } from "./category-tree";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
@@ -26,7 +27,6 @@ import { useQuery } from "@/lib/convex";
 import { friendlyError } from "@/lib/errors";
 import { formatDateTime, parseDecimal } from "@/lib/format";
 import { SHOP_TYPE_LABEL, UNIT_LABEL } from "@/lib/labels";
-import { cn } from "@/lib/utils";
 
 type Lists = FunctionReturnType<typeof api.catalog.lists>;
 type Item = Lists["items"][number];
@@ -700,7 +700,6 @@ function ShopDialog({ shop, verifyOnly = false }: { shop?: Shop; verifyOnly?: bo
 
 function CategoriesTab({ lists }: { lists: Lists }) {
   const add = useMutation(api.catalog.addCategory);
-  const move = useMutation(api.catalog.moveCategory);
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -715,52 +714,15 @@ function CategoriesTab({ lists }: { lists: Lists }) {
   return (
     <>
       <p className="text-sm text-foreground-secondary">
-        A category can have sub-categories (e.g. Grocery › Pulses). Filtering by a category includes its sub-categories.
+        A category can have sub-categories (e.g. Grocery › Pulses); filtering by a category includes them. To reorder, press and hold the
+        grip on the left of a row and drag it.
       </p>
-      <Card>
-        <ul className="divide-y divide-border" aria-label="Categories">
-          {lists.categories.map((c) => {
-            const siblings = lists.categories.filter((x) => x.parentId === c.parentId);
-            const position = siblings.findIndex((x) => x.categoryId === c.categoryId);
-            return (
-              <li key={c.categoryId} className={cn("flex items-center justify-between gap-2 py-2 pr-4", c.parentId ? "pl-10" : "pl-4")}>
-                <div className="flex min-w-0 flex-col">
-                  <span className="flex flex-wrap items-center gap-2 font-medium">
-                    {c.parentId ? <span className="text-foreground-muted" aria-hidden>↳</span> : null}
-                    {c.name}
-                    <Flags verified archived={c.archived} />
-                  </span>
-                  <span className="text-sm text-foreground-secondary">
-                    {c.parentId ? "Sub-category · " : ""}
-                    {c.itemCount} {c.itemCount === 1 ? "item" : "items"}
-                    {c.subcategoryItemCount > 0 ? `, ${c.subcategoryItemCount} of them in sub-categories` : ""}
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Move ${c.name} up`}
-                    disabled={position === 0}
-                    onClick={() => run(() => move({ categoryId: c.categoryId, direction: "up" }))}
-                  >
-                    <Icon icon={ArrowUp} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Move ${c.name} down`}
-                    disabled={position === siblings.length - 1}
-                    onClick={() => run(() => move({ categoryId: c.categoryId, direction: "down" }))}
-                  >
-                    <Icon icon={ArrowDown} />
-                  </Button>
-                  <CategoryDialog category={c} />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+      <Card className="overflow-hidden">
+        <CategoryTree
+          categories={lists.categories}
+          renderFlags={(c) => <Flags verified archived={c.archived} />}
+          renderActions={(c) => <CategoryDialog category={lists.categories.find((x) => x.categoryId === c.categoryId)!} />}
+        />
       </Card>
       <form
         className="flex flex-col gap-2 sm:flex-row"
