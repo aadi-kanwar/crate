@@ -62,7 +62,16 @@ export function ShoppingList({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
-        {lists.length > 1 ? (
+        {lists.length === 2 ? (
+          // Staff: their current property (chosen at the top of the screen) or Shared.
+          <SegmentedTabs<string>
+            label="Which list"
+            idPrefix="which-list"
+            value={chosen.key}
+            onChange={setListKey}
+            items={lists.map((l) => ({ value: l.key, label: l.name }))}
+          />
+        ) : lists.length > 2 ? (
           <Field id="which-list" label="List for">
             {(p) => (
               <NativeSelect {...p} value={chosen.key} onChange={(e) => setListKey(e.target.value)}>
@@ -122,7 +131,10 @@ export function ShoppingList({
 
 function Bills({ list, mode }: { list: List; mode: Mode }) {
   if (list.rows.length === 0) return null;
-  const planned = list.bills.filter((b) => b.items > 0);
+  // Shops by name; "No shop chosen" last.
+  const planned = list.bills
+    .filter((b) => b.items > 0)
+    .sort((a, b) => (a.shopName === null ? 1 : b.shopName === null ? -1 : a.shopName.localeCompare(b.shopName)));
   const bought = list.bills.filter((b) => b.boughtItems > 0);
   return (
     <Card>
