@@ -110,6 +110,38 @@ Everything is per property by default, with **Shared** as its own bucket and
    `SEED_ADMIN_PASSWORD`. The Vercel build creates the first admin from them
    (or run `npm run seed`). Remove `SEED_ADMIN_PASSWORD` afterwards.
 
+## Admin Hub sign-in
+
+Master admins open Crate from the Admin Hub without a second login (copied
+from the Staff app): `/sso` takes the hub's one-time ticket from the address
+fragment, checks it (`HUB_SSO_PUBLIC_KEY`, issuer `HUB_ORIGIN`, audience
+`crate`, role `master_admin`, unexpired, never used before) and opens a
+12-hour Admin login. A manager / kitchen staff number gets Admin added (their
+properties are kept); "Revoke in all apps" (`/sso/revoke`, audience
+`crate-revoke`) ends hub logins and gives back their previous role. Before
+the organisation exists, a master admin signing in is asked to set it up.
+
+## Going live (production)
+
+As in the Staff app: Vercel hosts the website and, on every deploy,
+`scripts/vercel-build.mjs` prepares Crate's production Convex deployment
+(login keys, `SITE_URL`, latest backend, the first admin from
+`SEED_ADMIN_*`). One time:
+
+1. Convex → project **crate** → **Production** → Settings → URL & Deploy Key →
+   Generate Production Deploy Key.
+2. Convex, Production → Environment Variables: `SEED_ADMIN_NAME`,
+   `SEED_ADMIN_PHONE`, `SEED_ADMIN_PASSWORD`, `HUB_SSO_PUBLIC_KEY` (the
+   same value as on Staff's production deployment) and `HUB_ORIGIN`
+   (`https://admin.livoza.org`).
+3. Vercel → Add New → Project → import **crate** → Environment Variables:
+   `CONVEX_DEPLOY_KEY` = the production key (Production only) → Deploy.
+4. Vercel → Settings → Domains → `crate.livoza.org`, then redeploy so
+   `SITE_URL` follows.
+5. In the Admin Hub's `tools.config.ts`, Crate's `revokeUrl` is
+   `https://<production deployment>.convex.site/sso/revoke`.
+6. Remove `SEED_ADMIN_PASSWORD` once the first admin exists.
+
 ## Commands
 
 ```bash

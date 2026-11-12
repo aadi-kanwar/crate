@@ -94,6 +94,19 @@ describe("Admin Hub sign-in (hub-sso)", () => {
     expect(me).not.toBeNull();
   });
 
+  test("before the organisation is set up, the master admin signs in and is asked to set it up", async () => {
+    const t = await setupTest();
+    expect((await ssoSignIn(t, await ticket())).tokens?.token).toBeTruthy();
+    const user = (await userByPhone(t, PHONE))!;
+    expect(user).toMatchObject({ role: "admin", ssoManaged: true });
+    expect(user.organizationId).toBeUndefined();
+    const session = (await t.run((ctx) => ctx.db.query("authSessions").withIndex("userId", (q) => q.eq("userId", user._id)).first()))!;
+    const as = t.withIdentity({ subject: `${user._id}|${session._id}` });
+    expect((await as.query(api.users.me, {}))?.organization).toBeNull();
+    const { organizationId } = await as.mutation(api.organization.create, { name: "Livoza", propertyName: "North PG" });
+    expect((await userByPhone(t, PHONE))?.organizationId).toBe(organizationId);
+  });
+
   test("the login ends after 12 hours", async () => {
     const { t } = await setup();
     await ssoSignIn(t, await ticket());

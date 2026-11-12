@@ -28,13 +28,14 @@ export const acceptTicket = internalMutation({
     // 1. One use per ticket. Recorded first, so even a refused ticket is spent.
     if (!(await spendJti(ctx, jti, now))) return null;
 
-    // 2. The organisation: Crate runs a single one.
+    // 2. The organisation: Crate runs a single one. Before it is set up, the
+    //    master admin signs in without one and is asked to set it up.
     const organization = await ctx.db
       .query("organizations")
       .filter((q) => q.eq(q.field("status"), "active"))
       .order("asc")
       .first();
-    if (organization === null) return null;
+    const organizationId = organization?._id;
 
     // 3. The account with this number (made an Admin if it isn't one yet), or a new one.
     const existing = await ctx.db
@@ -50,7 +51,7 @@ export const acceptTicket = internalMutation({
         phone,
         name,
         role: "admin",
-        organizationId: organization._id,
+        organizationId,
       });
       user = (await ctx.db.get(userId))!;
       accountCreated = true;
@@ -58,7 +59,7 @@ export const acceptTicket = internalMutation({
     } else {
       user = existing;
       if (user.disabled === true) return null;
-      if (user.organizationId !== undefined && user.organizationId !== organization._id) return null;
+      if (user.organizationId !== undefined && user.organizationId !== organizationId) return null;
       const changes: Partial<Doc<"users">> = {};
       if (user.role !== "admin") {
         previousRole = user.role;
@@ -68,7 +69,7 @@ export const acceptTicket = internalMutation({
         roleGranted = true;
         if (user.name === undefined) changes.name = name;
       }
-      if (user.organizationId === undefined) changes.organizationId = organization._id;
+      if (user.organizationId === undefined && organizationId !== undefined) changes.organizationId = organizationId;
       if (Object.keys(changes).length > 0) await ctx.db.patch(user._id, changes);
     }
     const userId: Id<"users"> = user._id;
@@ -77,7 +78,7 @@ export const acceptTicket = internalMutation({
     if (user.ssoManaged !== true) await ctx.db.patch(userId, { ssoManaged: true });
     const sessionId = await ctx.db.insert("authSessions", { userId, expirationTime: now + SSO_SESSION_MS });
     await writeAudit(ctx, {
-      organizationId: organization._id,
+      organizationId,
       actorUserId: userId,
       action: "sso.signed_in",
       entityType: "users",
