@@ -24,7 +24,7 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toaster";
 import { useQuery } from "@/lib/convex";
 import { friendlyError } from "@/lib/errors";
-import { formatPaise, formatQuantity, formatUnitPrice, parseDecimal } from "@/lib/format";
+import { formatPaise, formatQuantity, formatShortDate, formatUnitPrice, parseDecimal } from "@/lib/format";
 import { UNIT_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
@@ -521,6 +521,19 @@ function BuyMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog;
                             {plannedText(row)}
                             {sort === "category" ? ` · ${row.shopName ?? NO_SHOP}` : ""}
                             {row.estimatePaise !== null ? ` · ≈${formatPaise(row.estimatePaise)}` : ""}
+                          </span>
+                          {/* The last price paid, so it's visible without opening the item. */}
+                          <span className="tabular text-sm text-foreground-secondary">
+                            {row.lastPurchase ? (
+                              <>
+                                Last:{" "}
+                                <span className="font-medium text-foreground">{formatUnitPrice(row.lastPurchase.unitPricePaise, row.baseUnit)}</span>
+                                {` · ${row.lastPurchase.shopName} · ${formatShortDate(row.lastPurchase.loggedAt)}`}
+                                {row.lastPurchase.variant && !row.variant ? ` · ${row.lastPurchase.variant}` : ""}
+                              </>
+                            ) : (
+                              "Not bought before"
+                            )}
                           </span>
                         </span>
                       </button>

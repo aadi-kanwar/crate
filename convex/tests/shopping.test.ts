@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
+import { countsWithSubcategories } from "../lib/categories";
 import { expectedUnitPrice, shopBills } from "../lib/shopping";
 import {
   addProperty,
@@ -216,5 +217,60 @@ describe("sub-categories and default shops", () => {
     expect((await c.t.run((ctx) => ctx.db.get(itemId)))?.defaultShopId).toBe(c.dairy);
     const rowId = await c.member.as.mutation(api.shoppingList.add, { scope: c.main, itemId, quantity: 1 });
     expect((await c.t.run((ctx) => ctx.db.get(rowId)))?.shopId).toBe(c.dairy);
+  });
+});
+
+describe("category counts include sub-categories", () => {
+  test("a main category's count is its own items plus all its sub-categories' items", () => {
+    const rows = [
+      { _id: "grocery", name: "Grocery", sortOrder: 0 },
+      { _id: "dals", name: "Dals", parentId: "grocery", sortOrder: 0 },
+      { _id: "spices", name: "Spices", parentId: "grocery", sortOrder: 1 },
+      { _id: "dairy", name: "Dairy", sortOrder: 1 },
+    ];
+    const counts = countsWithSubcategories(rows, new Map([["grocery", 1], ["dals", 2], ["spices", 3]]));
+    expect(counts.get("grocery")).toEqual({ total: 6, inSubcategories: 5 });
+    expect(counts.get("dals")).toEqual({ total: 2, inSubcategories: 0 });
+    expect(counts.get("dairy")).toEqual({ total: 0, inSubcategories: 0 });
+  });
+
+  test("the Lists screen shows the totals", async () => {
+    const c = await setup();
+    const grocery = await firstCategory(c.t, c.admin);
+    const dals = await c.admin.as.mutation(api.catalog.addCategory, { name: "Dals", parentId: grocery });
+    await c.admin.as.mutation(api.catalog.createItem, { name: "Toor dal", categoryId: dals, baseUnit: "kg", aliases: [], packSizes: [], variants: [] });
+    const lists = await c.admin.as.query(api.catalog.lists, {});
+    // Rice and Milk are directly in Grocery; Toor dal is in Grocery › Dals.
+    expect(lists.categories.find((x) => x.categoryId === grocery)).toMatchObject({ itemCount: 3, subcategoryItemCount: 1 });
+    expect(lists.categories.find((x) => x.categoryId === dals)).toMatchObject({ itemCount: 1, subcategoryItemCount: 0 });
+  });
+});
+
+describe("last price in Buy mode", () => {
+  test("is the most recent purchase from any entry, including ones saved from a list; same variant when set", async () => {
+    const c = await setup();
+    const riceRow = await c.member.as.mutation(api.shoppingList.add, { scope: c.main, itemId: c.rice, quantity: 10, shopId: c.kirana });
+    const milkRow = await c.member.as.mutation(api.shoppingList.add, { scope: c.main, itemId: c.milk, variant: "Toned", quantity: 2 });
+    let rows = (await c.member.as.query(api.shoppingList.get, { scope: c.main })).rows;
+    expect(rows.find((r) => r.rowId === riceRow)!.lastPurchase).toBeNull();
+
+    // A typed-in entry...
+    await c.member.as.mutation(api.entries.create, { scope: c.main, shopId: c.dairy, lines: [{ itemId: c.rice, quantity: 1, totalPaise: 5_000 }], pricesConfirmed: true });
+    rows = (await c.member.as.query(api.shoppingList.get, { scope: c.main })).rows;
+    expect(rows.find((r) => r.rowId === riceRow)!.lastPurchase).toMatchObject({ unitPricePaise: 5_000, shopName: "Gokul Dairy" });
+
+    // ...then a purchase saved from the list becomes the latest.
+    advance(HOUR);
+    await c.member.as.mutation(api.shoppingList.tick, { rowId: riceRow, quantity: 10, shopId: c.kirana, totalPaise: 52_000 });
+    await c.member.as.mutation(api.shoppingList.savePurchases, { scope: c.main, pricesConfirmed: true });
+    rows = (await c.member.as.query(api.shoppingList.get, { scope: c.main })).rows;
+    expect(rows.find((r) => r.rowId === riceRow)!.lastPurchase).toMatchObject({ unitPricePaise: 5_200, shopName: "Sharma Kirana" });
+
+    // Milk (Toned): a later purchase with no variant doesn't replace the last Toned price.
+    await c.member.as.mutation(api.entries.create, { scope: c.main, shopId: c.dairy, lines: [{ itemId: c.milk, variant: "Toned", quantity: 1, totalPaise: 5_400 }], pricesConfirmed: true });
+    advance(HOUR);
+    await c.member.as.mutation(api.entries.create, { scope: c.main, shopId: c.kirana, lines: [{ itemId: c.milk, quantity: 1, totalPaise: 7_000 }], pricesConfirmed: true });
+    rows = (await c.member.as.query(api.shoppingList.get, { scope: c.main })).rows;
+    expect(rows.find((r) => r.rowId === milkRow)!.lastPurchase).toMatchObject({ unitPricePaise: 5_400, variant: "Toned" });
   });
 });

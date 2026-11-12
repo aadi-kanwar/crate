@@ -23,7 +23,7 @@ import {
   memberMutation,
   memberQuery,
 } from "./lib/functions";
-import { categoryLabels, orderedCategories } from "./lib/categories";
+import { categoryLabels, countsWithSubcategories, orderedCategories } from "./lib/categories";
 import { MAX_QUANTITY, searchKey, tidyQuantity } from "./lib/purchases";
 import {
   vBaseUnit,
@@ -311,6 +311,7 @@ export const lists = adminQuery({
     for (const item of items)
       itemsPerCategory.set(item.categoryId, (itemsPerCategory.get(item.categoryId) ?? 0) + 1);
     const categoryName = categoryLabels(categories);
+    const categoryCounts = countsWithSubcategories(categories, itemsPerCategory);
     const shopName = new Map<string, string>(shops.map((sh) => [sh._id, sh.name]));
     const userIds = [...new Set([...items, ...shops].map((r) => r.createdBy).filter((id) => id !== undefined))];
     const users = new Map<string, string>();
@@ -322,7 +323,10 @@ export const lists = adminQuery({
         parentId: c.parentId ?? null,
         label: categoryName.get(c._id) ?? c.name,
         archived: c.archived,
-        itemCount: itemsPerCategory.get(c._id) ?? 0,
+        /** Items in it, including everything in its sub-categories. */
+        itemCount: categoryCounts.get(c._id)?.total ?? 0,
+        /** Of those, how many are in its sub-categories. */
+        subcategoryItemCount: categoryCounts.get(c._id)?.inSubcategories ?? 0,
       })),
       items: items
         .sort((a, b) => a.name.localeCompare(b.name))

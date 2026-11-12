@@ -37,3 +37,22 @@ export function withSubcategories(rows: readonly Row[], id: string): string[] {
 export function categoryRank(rows: readonly Row[]): Map<string, number> {
   return new Map(orderedCategories(rows).map((r, i) => [r._id, i]));
 }
+
+/**
+ * Item counts where a main category includes everything in its
+ * sub-categories: { total, inSubcategories } by category id.
+ */
+export function countsWithSubcategories(
+  rows: readonly Row[],
+  direct: ReadonlyMap<string, number>,
+): Map<string, { total: number; inSubcategories: number }> {
+  const out = new Map<string, { total: number; inSubcategories: number }>();
+  for (const row of rows) {
+    const own = direct.get(row._id) ?? 0;
+    const inSubcategories = rows
+      .filter((r) => r.parentId === row._id)
+      .reduce((sum, r) => sum + (direct.get(r._id) ?? 0), 0);
+    out.set(row._id, { total: own + inSubcategories, inSubcategories });
+  }
+  return out;
+}
