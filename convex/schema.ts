@@ -86,8 +86,10 @@ export default defineSchema({
 
   categories: defineTable({
     organizationId: v.id("organizations"),
-    name: v.string(), // unique within the organisation (case-insensitive)
-    sortOrder: v.number(),
+    name: v.string(), // unique among its siblings (case-insensitive)
+    /** Set for a sub-category: the top-level category it belongs to (one level only). */
+    parentId: v.optional(v.id("categories")),
+    sortOrder: v.number(), // order among its siblings
     archived: v.boolean(),
     createdAt: v.number(),
   }).index("by_org_order", ["organizationId", "sortOrder"]),
@@ -100,13 +102,16 @@ export default defineSchema({
     aliases: v.array(v.string()),
     packSizes: v.array(vPackSize),
     variants: v.array(v.string()),
+    /** The shop it is usually bought from (pre-filled on shopping lists). */
+    defaultShopId: v.optional(v.id("shops")),
     status: vVerification,
     archived: v.boolean(),
     createdBy: v.optional(v.id("users")),
     createdAt: v.number(),
   })
     .index("by_org", ["organizationId"])
-    .index("by_org_status", ["organizationId", "status"]),
+    .index("by_org_status", ["organizationId", "status"])
+    .index("by_default_shop", ["defaultShopId"]),
 
   shops: defineTable({
     organizationId: v.id("organizations"),
@@ -176,6 +181,47 @@ export default defineSchema({
     .index("by_org_loggedAt", ["organizationId", "loggedAt"])
     .index("by_shop_loggedAt", ["shopId", "loggedAt"])
     .index("by_category_loggedAt", ["categoryId", "loggedAt"]),
+
+  /**
+   * The live shopping lists: one per property and one Shared (scopeKey as on
+   * entries). A row is an item to buy (List mode). Ticking it off in Buy
+   * mode fills `bought`; "Save purchases" turns the bought rows into entries
+   * (one per shop) and clears `bought`, keeping the row for next time.
+   */
+  shoppingListItems: defineTable({
+    organizationId: v.id("organizations"),
+    scopeKey: v.string(),
+    propertyId: v.optional(v.id("properties")),
+    itemId: v.id("items"),
+    variant: v.optional(v.string()),
+    quantity: v.number(), // planned, in the item's base unit
+    packLabel: v.optional(v.string()),
+    packCount: v.optional(v.number()),
+    shopId: v.optional(v.id("shops")), // where it is to be bought
+    /** Price per unit typed in List mode; otherwise the estimate uses the last price paid. */
+    expectedUnitPricePaise: v.optional(v.number()),
+    addedBy: v.id("users"),
+    createdAt: v.number(),
+    updatedBy: v.optional(v.id("users")),
+    updatedAt: v.optional(v.number()),
+    /** Set when ticked off in Buy mode: what was actually bought. */
+    bought: v.optional(
+      v.object({
+        quantity: v.number(),
+        packLabel: v.optional(v.string()),
+        packCount: v.optional(v.number()),
+        variant: v.optional(v.string()),
+        shopId: v.id("shops"),
+        totalPaise: v.number(),
+        unitPricePaise: v.number(),
+        boughtBy: v.id("users"),
+        boughtAt: v.number(),
+      }),
+    ),
+  })
+    .index("by_scope", ["organizationId", "scopeKey"])
+    .index("by_item", ["itemId"])
+    .index("by_shop", ["shopId"]),
 
   // Sign-in abuse protection (as in the Staff app): failed attempts per phone.
   authAttemptLimits: defineTable({

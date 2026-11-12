@@ -25,6 +25,7 @@ import { useQuery } from "@/lib/convex";
 import { friendlyError } from "@/lib/errors";
 import { formatDateTime, parseDecimal } from "@/lib/format";
 import { SHOP_TYPE_LABEL, UNIT_LABEL } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 
 type Lists = FunctionReturnType<typeof api.catalog.lists>;
 type Item = Lists["items"][number];
@@ -120,7 +121,9 @@ function ItemsTab({ lists }: { lists: Lists }) {
   const items = lists.items.filter(
     (i) =>
       (showArchived || !i.archived) &&
-      (categoryId === "" || i.categoryId === categoryId) &&
+      (categoryId === "" ||
+        i.categoryId === categoryId ||
+        lists.categories.some((c) => c.categoryId === i.categoryId && c.parentId === categoryId)) &&
       matchesSearch(query, i.name, i.aliases),
   );
   return (
@@ -131,7 +134,7 @@ function ItemsTab({ lists }: { lists: Lists }) {
           <option value="">All categories</option>
           {lists.categories.map((c) => (
             <option key={c.categoryId} value={c.categoryId}>
-              {c.name}
+              {c.label}
             </option>
           ))}
         </NativeSelect>
@@ -162,6 +165,7 @@ function ItemRows({ items, lists, review = false }: { items: Item[]; lists: List
               <span className="text-sm text-foreground-secondary">
                 {item.categoryName} · per {UNIT_LABEL[item.baseUnit].one} · {item.lineCount} {item.lineCount === 1 ? "purchase" : "purchases"}
                 {item.aliases.length > 0 ? ` · also “${item.aliases.join("”, “")}”` : ""}
+                {item.defaultShopName ? ` · usually from ${item.defaultShopName}` : ""}
               </span>
               {review ? (
                 <span className="text-xs text-foreground-secondary">
@@ -206,6 +210,7 @@ function VerifyItem({ item }: { item: Item }) {
             aliases: item.aliases,
             packSizes: item.packSizes,
             variants: item.variants,
+            defaultShopId: item.defaultShopId ?? undefined,
             archived: item.archived,
             verify: true,
           });
@@ -237,7 +242,9 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
   const [variants, setVariants] = useState("");
   const [packs, setPacks] = useState<{ label: string; quantity: string }[]>([]);
   const [archived, setArchived] = useState(false);
+  const [defaultShopId, setDefaultShopId] = useState("");
   const [busy, setBusy] = useState(false);
+  const liveShops = lists.shops.filter((sh) => !sh.archived || sh.shopId === item?.defaultShopId);
   const liveCategories = lists.categories.filter((c) => !c.archived || c.categoryId === item?.categoryId);
   const reset = () => {
     setName(item?.name ?? "");
@@ -247,6 +254,7 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
     setVariants(item?.variants.join(", ") ?? "");
     setPacks(item?.packSizes.map((p) => ({ label: p.label, quantity: String(p.quantity) })) ?? []);
     setArchived(item?.archived ?? false);
+    setDefaultShopId(item?.defaultShopId ?? "");
   };
   return (
     <Dialog
@@ -286,7 +294,15 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
             }
             setBusy(true);
             try {
-              const fields = { name, categoryId, baseUnit, aliases: splitList(aliases), variants: splitList(variants), packSizes };
+              const fields = {
+                name,
+                categoryId,
+                baseUnit,
+                aliases: splitList(aliases),
+                variants: splitList(variants),
+                packSizes,
+                defaultShopId: (defaultShopId || undefined) as Id<"shops"> | undefined,
+              };
               if (item) await updateItem({ ...fields, itemId: item.itemId, archived, verify: false });
               else await createItem(fields);
               toast.success("Saved.");
@@ -307,7 +323,7 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
                 <NativeSelect {...p} value={categoryId} onChange={(e) => setCategoryId(e.target.value as Id<"categories">)}>
                   {liveCategories.map((c) => (
                     <option key={c.categoryId} value={c.categoryId}>
-                      {c.name}
+                      {c.label}
                     </option>
                   ))}
                 </NativeSelect>
@@ -330,6 +346,18 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
               )}
             </Field>
           </div>
+          <Field id="item-shop" label="Default shop" hint="Where it's usually bought. Shopping lists start with this shop.">
+            {(p) => (
+              <NativeSelect {...p} value={defaultShopId} onChange={(e) => setDefaultShopId(e.target.value)}>
+                <option value="">None</option>
+                {liveShops.map((sh) => (
+                  <option key={sh.shopId} value={sh.shopId}>
+                    {sh.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
           <Field id="item-aliases" label="Other names" hint="Separate with commas, any language: tamatar, टमाटर">
             {(p) => <Input {...p} value={aliases} onChange={(e) => setAliases(e.target.value)} />}
           </Field>
@@ -671,6 +699,7 @@ function CategoriesTab({ lists }: { lists: Lists }) {
   const add = useMutation(api.catalog.addCategory);
   const move = useMutation(api.catalog.moveCategory);
   const [name, setName] = useState("");
+  const [parentId, setParentId] = useState("");
   const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<unknown>) => {
     try {
@@ -679,53 +708,77 @@ function CategoriesTab({ lists }: { lists: Lists }) {
       toast.error(friendlyError(error));
     }
   };
+  const tops = lists.categories.filter((c) => c.parentId === null);
   return (
     <>
+      <p className="text-sm text-foreground-secondary">
+        A category can have sub-categories (e.g. Grocery › Pulses). Filtering by a category includes its sub-categories.
+      </p>
       <Card>
         <ul className="divide-y divide-border" aria-label="Categories">
-          {lists.categories.map((c, i) => (
-            <li key={c.categoryId} className="flex items-center justify-between gap-2 px-4 py-2">
-              <div className="flex min-w-0 flex-col">
-                <span className="flex flex-wrap items-center gap-2 font-medium">
-                  {c.name}
-                  <Flags verified archived={c.archived} />
-                </span>
-                <span className="text-sm text-foreground-secondary">
-                  {c.itemCount} {c.itemCount === 1 ? "item" : "items"}
-                </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button variant="ghost" size="icon" aria-label={`Move ${c.name} up`} disabled={i === 0} onClick={() => run(() => move({ categoryId: c.categoryId, direction: "up" }))}>
-                  <Icon icon={ArrowUp} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Move ${c.name} down`}
-                  disabled={i === lists.categories.length - 1}
-                  onClick={() => run(() => move({ categoryId: c.categoryId, direction: "down" }))}
-                >
-                  <Icon icon={ArrowDown} />
-                </Button>
-                <CategoryDialog category={c} />
-              </div>
-            </li>
-          ))}
+          {lists.categories.map((c) => {
+            const siblings = lists.categories.filter((x) => x.parentId === c.parentId);
+            const position = siblings.findIndex((x) => x.categoryId === c.categoryId);
+            return (
+              <li key={c.categoryId} className={cn("flex items-center justify-between gap-2 py-2 pr-4", c.parentId ? "pl-10" : "pl-4")}>
+                <div className="flex min-w-0 flex-col">
+                  <span className="flex flex-wrap items-center gap-2 font-medium">
+                    {c.parentId ? <span className="text-foreground-muted" aria-hidden>↳</span> : null}
+                    {c.name}
+                    <Flags verified archived={c.archived} />
+                  </span>
+                  <span className="text-sm text-foreground-secondary">
+                    {c.parentId ? "Sub-category · " : ""}
+                    {c.itemCount} {c.itemCount === 1 ? "item" : "items"}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Move ${c.name} up`}
+                    disabled={position === 0}
+                    onClick={() => run(() => move({ categoryId: c.categoryId, direction: "up" }))}
+                  >
+                    <Icon icon={ArrowUp} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Move ${c.name} down`}
+                    disabled={position === siblings.length - 1}
+                    onClick={() => run(() => move({ categoryId: c.categoryId, direction: "down" }))}
+                  >
+                    <Icon icon={ArrowDown} />
+                  </Button>
+                  <CategoryDialog category={c} />
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </Card>
       <form
-        className="flex gap-2"
+        className="flex flex-col gap-2 sm:flex-row"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
           await run(async () => {
-            await add({ name });
+            await add({ name, parentId: (parentId || undefined) as Id<"categories"> | undefined });
             setName("");
           });
           setBusy(false);
         }}
       >
-        <Input aria-label="New category" placeholder="New category" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Input aria-label="New category" placeholder={parentId ? "New sub-category" : "New category"} value={name} onChange={(e) => setName(e.target.value)} required />
+        <NativeSelect aria-label="Where" value={parentId} onChange={(e) => setParentId(e.target.value)} className="sm:w-64">
+          <option value="">As a main category</option>
+          {tops.map((c) => (
+            <option key={c.categoryId} value={c.categoryId}>
+              Under {c.name}
+            </option>
+          ))}
+        </NativeSelect>
         <Button type="submit" loading={busy}>
           <Icon icon={Plus} />
           Add
