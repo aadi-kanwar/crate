@@ -9,7 +9,10 @@ import { Icon } from "@/components/ui/icon";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatPaise, formatWhen } from "@/lib/format";
 
-export type EntryRow = FunctionReturnType<typeof api.entries.recent>[number];
+export type EntryRow = FunctionReturnType<typeof api.entries.recent>[number] & {
+  /** Entries log with an item / category / shop filter: the matching lines' amount. */
+  matchingPaise?: number;
+};
 
 /** Entries as tappable rows: shop, scope, when, what, total; a lock once only an admin can change it. */
 export function EntryList({
@@ -32,7 +35,16 @@ export function EntryList({
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="truncate font-medium">{e.shopName}</span>
-                  <span className="tabular shrink-0 font-medium">{formatPaise(e.totalPaise)}</span>
+                  <span className="tabular shrink-0 text-right font-medium">
+                    {e.matchingPaise !== undefined && e.matchingPaise !== e.totalPaise ? (
+                      <>
+                        {formatPaise(e.matchingPaise)}
+                        <span className="block text-xs font-normal text-foreground-secondary">of {formatPaise(e.totalPaise)}</span>
+                      </>
+                    ) : (
+                      formatPaise(e.totalPaise)
+                    )}
+                  </span>
                 </div>
                 <span className="truncate text-sm text-foreground-secondary">
                   {e.itemNames.join(", ")}

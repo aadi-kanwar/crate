@@ -76,6 +76,24 @@ own Convex project**, Tailwind 4 with MealSync's tokens and components
 - Every create, edit and delete is in the **Audit log** with before and
   after values.
 
+## History (admins only)
+
+Everything is per property by default, with **Shared** as its own bucket and
+**All (organisation)**; Shared purchases are never split across properties.
+
+- **Entries** (`/admin`): filter by property / Shared / All, dates, category,
+  shop, item and who entered it; totals for what matches (with an item,
+  category or shop filter, only the matching items count). Open an entry to
+  change anything, including its date. **Download CSV**: one row per item
+  bought, for the same filters (recorded in the audit log).
+- **Items** (`/admin/items`): each item's last price and last 30 days. The
+  item page shows quantity bought per week and per month (chart and table),
+  the **approximate usage** for each property and Shared (what one purchase
+  bought ÷ the days until the next purchase, averaged over the latest 5 gaps,
+  e.g. "≈1.1 kg/day" or "1 cylinder lasts ≈9 days"; "not enough data" until
+  there are purchases on two different days), and the **price history** with
+  each purchase's shop and variant, filterable by variant and shop.
+
 ## Security rules in the code
 
 - Every backend function is built from the permission wrappers in
