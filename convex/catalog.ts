@@ -23,6 +23,7 @@ import {
   memberMutation,
   memberQuery,
 } from "./lib/functions";
+import { categoryLabels, orderedCategories } from "./lib/categories";
 import { MAX_QUANTITY, searchKey, tidyQuantity } from "./lib/purchases";
 import {
   vBaseUnit,
@@ -147,6 +148,7 @@ const itemSnapshot = (item: Doc<"items">) => ({
   aliases: item.aliases,
   packSizes: item.packSizes,
   variants: item.variants,
+  defaultShopId: item.defaultShopId ?? null,
   status: item.status,
   archived: item.archived,
 });
@@ -168,9 +170,16 @@ export const forEntry = memberQuery({
   args: {},
   handler: async (ctx) => {
     const organizationId = ctx.member.organization._id;
-    const categories = (await categoriesOf(ctx, organizationId)).filter((c) => !c.archived);
+    const all = await categoriesOf(ctx, organizationId);
+    const labels = categoryLabels(all);
+    const categories = orderedCategories(all).filter((c) => !c.archived);
     return {
-      categories: categories.map((c) => ({ categoryId: c._id, name: c.name })),
+      categories: categories.map((c) => ({
+        categoryId: c._id,
+        name: c.name,
+        parentId: c.parentId ?? null,
+        label: labels.get(c._id) ?? c.name,
+      })),
       items: (await itemsOf(ctx, organizationId))
         .filter((i) => !i.archived)
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -182,6 +191,7 @@ export const forEntry = memberQuery({
           aliases: i.aliases,
           packSizes: i.packSizes,
           variants: i.variants,
+          defaultShopId: i.defaultShopId ?? null,
           verified: i.status === "verified",
         })),
       shops: (await shopsOf(ctx, organizationId))
@@ -205,12 +215,14 @@ export const addItem = memberMutation({
     categoryId: v.id("categories"),
     baseUnit: vBaseUnit,
     aliases: v.optional(v.array(v.string())),
+    defaultShopId: v.optional(v.id("shops")),
   },
   handler: async (ctx, args) => {
     const organizationId = ctx.member.organization._id;
     const name = cleanName(args.name, "the item's name");
     const category = await loadCategory(ctx, organizationId, args.categoryId);
     if (category.archived) throw appError("INVALID_INPUT", "That category is archived.");
+    const defaultShopId = await checkDefaultShop(ctx, organizationId, args.defaultShopId);
     assertNewName(await itemsOf(ctx, organizationId), name, "an item");
     const itemId = await ctx.db.insert("items", {
       organizationId,
@@ -220,6 +232,7 @@ export const addItem = memberMutation({
       aliases: cleanList(args.aliases ?? [], "other name", name),
       packSizes: [],
       variants: [],
+      defaultShopId,
       status: ctx.member.isAdmin ? "verified" : "unverified",
       archived: false,
       createdBy: ctx.member.userId,
@@ -297,14 +310,17 @@ export const lists = adminQuery({
     }
     for (const item of items)
       itemsPerCategory.set(item.categoryId, (itemsPerCategory.get(item.categoryId) ?? 0) + 1);
-    const categoryName = new Map<string, string>(categories.map((c) => [c._id, c.name]));
+    const categoryName = categoryLabels(categories);
+    const shopName = new Map<string, string>(shops.map((sh) => [sh._id, sh.name]));
     const userIds = [...new Set([...items, ...shops].map((r) => r.createdBy).filter((id) => id !== undefined))];
     const users = new Map<string, string>();
     for (const id of userIds) users.set(id, (await ctx.db.get(id))?.name ?? "");
     return {
-      categories: categories.map((c) => ({
+      categories: orderedCategories(categories).map((c) => ({
         categoryId: c._id,
         name: c.name,
+        parentId: c.parentId ?? null,
+        label: categoryName.get(c._id) ?? c.name,
         archived: c.archived,
         itemCount: itemsPerCategory.get(c._id) ?? 0,
       })),
@@ -319,6 +335,8 @@ export const lists = adminQuery({
           aliases: i.aliases,
           packSizes: i.packSizes,
           variants: i.variants,
+          defaultShopId: i.defaultShopId ?? null,
+          defaultShopName: i.defaultShopId ? (shopName.get(i.defaultShopId) ?? null) : null,
           verified: i.status === "verified",
           archived: i.archived,
           lineCount: linesPerItem.get(i._id) ?? 0,
@@ -344,17 +362,26 @@ export const lists = adminQuery({
 
 // ---- Categories -------------------------------------------------------------
 
+/** Adds a category, or a sub-category when `parentId` names a top-level category. */
 export const addCategory = adminMutation({
-  args: { name: v.string() },
+  args: { name: v.string(), parentId: v.optional(v.id("categories")) },
   handler: async (ctx, args) => {
     const organizationId = ctx.admin.organization._id;
     const name = cleanName(args.name, "the category's name", 40);
-    const existing = await categoriesOf(ctx, organizationId);
-    assertNewName(existing, name, "a category");
+    let parentId: Id<"categories"> | undefined;
+    if (args.parentId) {
+      const parent = await loadCategory(ctx, organizationId, args.parentId);
+      if (parent.parentId)
+        throw appError("INVALID_INPUT", "Sub-categories can only go under a main category.");
+      parentId = parent._id;
+    }
+    const siblings = (await categoriesOf(ctx, organizationId)).filter((c) => c.parentId === parentId);
+    assertNewName(siblings, name, parentId ? "a sub-category" : "a category");
     const categoryId = await ctx.db.insert("categories", {
       organizationId,
       name,
-      sortOrder: Math.max(-1, ...existing.map((c) => c.sortOrder)) + 1,
+      parentId,
+      sortOrder: Math.max(-1, ...siblings.map((c) => c.sortOrder)) + 1,
       archived: false,
       createdAt: Date.now(),
     });
@@ -364,7 +391,7 @@ export const addCategory = adminMutation({
       action: "category.created",
       entityType: "categories",
       entityId: categoryId,
-      metadata: { after: { name } },
+      metadata: { after: { name, parentId: parentId ?? null } },
     });
     return categoryId;
   },
@@ -377,7 +404,8 @@ export const updateCategory = adminMutation({
     const organizationId = ctx.admin.organization._id;
     const category = await loadCategory(ctx, organizationId, args.categoryId);
     const name = cleanName(args.name, "the category's name", 40);
-    assertNewName(await categoriesOf(ctx, organizationId), name, "a category", category._id);
+    const siblings = (await categoriesOf(ctx, organizationId)).filter((c) => c.parentId === category.parentId);
+    assertNewName(siblings, name, category.parentId ? "a sub-category" : "a category", category._id);
     if (name === category.name && args.archived === category.archived) return null;
     await ctx.db.patch(category._id, { name, archived: args.archived });
     await writeAudit(ctx, {
@@ -395,12 +423,15 @@ export const updateCategory = adminMutation({
   },
 });
 
-/** Moves a category one place up or down. */
+/** Moves a category one place up or down among its siblings (sub-categories stay under their category). */
 export const moveCategory = adminMutation({
   args: { categoryId: v.id("categories"), direction: v.union(v.literal("up"), v.literal("down")) },
   handler: async (ctx, args) => {
     const organizationId = ctx.admin.organization._id;
-    const all = await categoriesOf(ctx, organizationId);
+    const category = await loadCategory(ctx, organizationId, args.categoryId);
+    const all = (await categoriesOf(ctx, organizationId))
+      .filter((c) => c.parentId === category.parentId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
     const index = all.findIndex((c) => c._id === args.categoryId);
     if (index === -1) throw appError("NOT_FOUND");
     const swapWith = args.direction === "up" ? index - 1 : index + 1;
@@ -435,12 +466,30 @@ const vItemFields = {
   aliases: v.array(v.string()),
   packSizes: v.array(vPackSize),
   variants: v.array(v.string()),
+  /** The shop it is usually bought from; leave out for none. */
+  defaultShopId: v.optional(v.id("shops")),
 };
+
+/** A default shop of this organisation that isn't archived (or none). */
+async function checkDefaultShop(ctx: Db, organizationId: Id<"organizations">, shopId: Id<"shops"> | undefined, current?: Id<"shops">) {
+  if (shopId === undefined) return undefined;
+  const shop = await loadShop(ctx, organizationId, shopId);
+  if (shop.archived && shop._id !== current) throw appError("INVALID_INPUT", `"${shop.name}" is archived.`);
+  return shop._id;
+}
 
 async function cleanItemFields(
   ctx: Db,
   organizationId: Id<"organizations">,
-  args: { name: string; categoryId: Id<"categories">; aliases: string[]; packSizes: PackSize[]; variants: string[] },
+  args: {
+    name: string;
+    categoryId: Id<"categories">;
+    aliases: string[];
+    packSizes: PackSize[];
+    variants: string[];
+    defaultShopId?: Id<"shops">;
+  },
+  currentShop?: Id<"shops">,
 ) {
   const name = cleanName(args.name, "the item's name");
   const category = await loadCategory(ctx, organizationId, args.categoryId);
@@ -450,6 +499,7 @@ async function cleanItemFields(
     aliases: cleanList(args.aliases, "other name", name),
     packSizes: cleanPacks(args.packSizes),
     variants: cleanList(args.variants, "variant"),
+    defaultShopId: await checkDefaultShop(ctx, organizationId, args.defaultShopId, currentShop),
   };
 }
 
@@ -491,7 +541,7 @@ export const updateItem = adminMutation({
   handler: async (ctx, args) => {
     const organizationId = ctx.admin.organization._id;
     const item = await loadItem(ctx, organizationId, args.itemId);
-    const fields = await cleanItemFields(ctx, organizationId, args);
+    const fields = await cleanItemFields(ctx, organizationId, args, item.defaultShopId);
     if (!args.archived)
       assertNewName(await itemsOf(ctx, organizationId), fields.name, "an item", item._id);
     const lines = await ctx.db
@@ -544,11 +594,17 @@ export const mergeItem = adminMutation({
       .collect();
     for (const line of lines)
       await ctx.db.patch(line._id, { itemId: keep._id, categoryId: keep.categoryId });
+    const listRows = await ctx.db
+      .query("shoppingListItems")
+      .withIndex("by_item", (q) => q.eq("itemId", duplicate._id))
+      .collect();
+    for (const row of listRows) await ctx.db.patch(row._id, { itemId: keep._id });
     const packLabels = new Set(keep.packSizes.map((p) => searchKey(p.label)));
     await ctx.db.patch(keep._id, {
       aliases: cleanList([...keep.aliases, duplicate.name, ...duplicate.aliases], "other name", keep.name),
       variants: cleanList([...keep.variants, ...duplicate.variants], "variant"),
       packSizes: [...keep.packSizes, ...duplicate.packSizes.filter((p) => !packLabels.has(searchKey(p.label)))],
+      defaultShopId: keep.defaultShopId ?? duplicate.defaultShopId,
     });
     await ctx.db.delete(duplicate._id);
     await writeAudit(ctx, {
@@ -665,5 +721,23 @@ async function repointShop(ctx: WriteDb, from: Id<"shops">, to: Id<"shops">) {
     .withIndex("by_shop_loggedAt", (q) => q.eq("shopId", from))
     .collect();
   for (const line of lines) await ctx.db.patch(line._id, { shopId: to });
+  // Items that usually come from it, and shopping lists, follow too.
+  for (const item of await ctx.db
+    .query("items")
+    .withIndex("by_default_shop", (q) => q.eq("defaultShopId", from))
+    .collect())
+    await ctx.db.patch(item._id, { defaultShopId: to });
+  for (const row of await ctx.db
+    .query("shoppingListItems")
+    .withIndex("by_shop", (q) => q.eq("shopId", from))
+    .collect())
+    await ctx.db.patch(row._id, { shopId: to });
+  // Ticked-off rows record their own shop.
+  const organizationId = (await ctx.db.get(to))!.organizationId;
+  for (const row of await ctx.db
+    .query("shoppingListItems")
+    .withIndex("by_scope", (q) => q.eq("organizationId", organizationId))
+    .collect())
+    if (row.bought?.shopId === from) await ctx.db.patch(row._id, { bought: { ...row.bought, shopId: to } });
   return { entriesMoved: entries.length, linesMoved: lines.length };
 }

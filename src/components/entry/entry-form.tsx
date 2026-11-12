@@ -521,7 +521,7 @@ function LineCard({
   );
 }
 
-function Chips<V extends string>({
+export function Chips<V extends string>({
   label,
   options,
   value,

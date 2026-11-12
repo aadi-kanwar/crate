@@ -95,7 +95,7 @@ async function loadChangeable(ctx: Db, member: MemberViewer, entryId: Id<"entrie
 }
 
 /** The scope's key and property, checking the person may use it. */
-function resolveScope(member: MemberViewer, scope: Scope) {
+export function resolveScope(member: MemberViewer, scope: Scope) {
   if (scope.kind === "shared") return { scopeKey: SHARED, propertyId: undefined };
   const property = requireProperty(member, scope.propertyId);
   return { scopeKey: property._id as string, propertyId: property._id };
@@ -302,6 +302,47 @@ async function requireConfirmed(
 // Create, edit, delete
 // ---------------------------------------------------------------------------
 
+/**
+ * Creates an entry with all the usual checks (scope, shop, lines, price
+ * check) and its audit record. Shared by New entry and the shopping list's
+ * "Save purchases".
+ */
+export async function insertEntry(
+  ctx: Pick<MutationCtx, "db">,
+  member: MemberViewer,
+  args: { scope: Scope; shopId: Id<"shops">; note?: string; lines: readonly LineInput[]; pricesConfirmed: boolean },
+): Promise<Id<"entries">> {
+  const organizationId = member.organization._id;
+  const { scopeKey, propertyId } = resolveScope(member, args.scope);
+  await checkShop(ctx, organizationId, args.shopId);
+  const lines = await resolveLines(ctx, organizationId, args.lines);
+  await requireConfirmed(ctx, lines, args.pricesConfirmed);
+  const now = Date.now();
+  const entryId = await ctx.db.insert("entries", {
+    organizationId,
+    propertyId,
+    scopeKey,
+    shopId: args.shopId,
+    loggedAt: now,
+    note: cleanNote(args.note),
+    totalPaise: lines.reduce((sum, l) => sum + l.totalPaise, 0),
+    lineCount: lines.length,
+    createdBy: member.userId,
+    createdAt: now,
+  });
+  const entry = (await ctx.db.get(entryId))!;
+  await insertLines(ctx, entry, lines);
+  await writeAudit(ctx, {
+    organizationId,
+    actorUserId: member.userId,
+    action: "entry.created",
+    entityType: "entries",
+    entityId: entryId,
+    metadata: { after: await snapshot(ctx, entry) },
+  });
+  return entryId;
+}
+
 export const create = memberMutation({
   args: {
     scope: vScope,
@@ -311,38 +352,7 @@ export const create = memberMutation({
     /** The person has seen and confirmed any "Did you mean…?" warnings. */
     pricesConfirmed: v.boolean(),
   },
-  handler: async (ctx, args) => {
-    const { member } = ctx;
-    const organizationId = member.organization._id;
-    const { scopeKey, propertyId } = resolveScope(member, args.scope);
-    await checkShop(ctx, organizationId, args.shopId);
-    const lines = await resolveLines(ctx, organizationId, args.lines);
-    await requireConfirmed(ctx, lines, args.pricesConfirmed);
-    const now = Date.now();
-    const entryId = await ctx.db.insert("entries", {
-      organizationId,
-      propertyId,
-      scopeKey,
-      shopId: args.shopId,
-      loggedAt: now,
-      note: cleanNote(args.note),
-      totalPaise: lines.reduce((sum, l) => sum + l.totalPaise, 0),
-      lineCount: lines.length,
-      createdBy: member.userId,
-      createdAt: now,
-    });
-    const entry = (await ctx.db.get(entryId))!;
-    await insertLines(ctx, entry, lines);
-    await writeAudit(ctx, {
-      organizationId,
-      actorUserId: member.userId,
-      action: "entry.created",
-      entityType: "entries",
-      entityId: entryId,
-      metadata: { after: await snapshot(ctx, entry) },
-    });
-    return entryId;
-  },
+  handler: async (ctx, args) => await insertEntry(ctx, ctx.member, args),
 });
 
 /**

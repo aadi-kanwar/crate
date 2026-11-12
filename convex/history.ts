@@ -13,6 +13,7 @@ import type { QueryCtx } from "./_generated/server";
 import { entrySummary } from "./entries";
 import { writeAudit } from "./lib/audit";
 import { toCsv } from "./lib/csv";
+import { categoryLabels, withSubcategories } from "./lib/categories";
 import { appError } from "./lib/errors";
 import { adminMutation, adminQuery, type AdminViewer } from "./lib/functions";
 import {
@@ -64,6 +65,15 @@ async function filteredLines(ctx: Db, admin: AdminViewer, filters: Filters) {
   const organizationId = admin.organization._id;
   const scope = checkScope(admin, filters.scope);
   const { from, to } = checkRange(filters.fromDate, filters.toDate);
+  const categoryIds = filters.categoryId
+    ? withSubcategories(
+        await ctx.db
+          .query("categories")
+          .withIndex("by_org_order", (q) => q.eq("organizationId", organizationId))
+          .collect(),
+        filters.categoryId,
+      )
+    : null;
   let rows: Doc<"entryLines">[];
   if (filters.itemId) {
     const itemId = filters.itemId;
@@ -78,11 +88,18 @@ async function filteredLines(ctx: Db, admin: AdminViewer, filters: Filters) {
       .withIndex("by_shop_loggedAt", (q) => q.eq("shopId", shopId).gte("loggedAt", from).lt("loggedAt", to))
       .collect();
   } else if (filters.categoryId) {
-    const categoryId = filters.categoryId;
-    rows = await ctx.db
-      .query("entryLines")
-      .withIndex("by_category_loggedAt", (q) => q.eq("categoryId", categoryId).gte("loggedAt", from).lt("loggedAt", to))
-      .collect();
+    // The category and its sub-categories.
+    rows = [];
+    for (const categoryId of categoryIds!) {
+      rows.push(
+        ...(await ctx.db
+          .query("entryLines")
+          .withIndex("by_category_loggedAt", (q) =>
+            q.eq("categoryId", categoryId as Id<"categories">).gte("loggedAt", from).lt("loggedAt", to),
+          )
+          .collect()),
+      );
+    }
   } else if (scope !== "all") {
     rows = await ctx.db
       .query("entryLines")
@@ -103,7 +120,7 @@ async function filteredLines(ctx: Db, admin: AdminViewer, filters: Filters) {
       (scope === "all" || l.scopeKey === scope) &&
       (!filters.itemId || l.itemId === filters.itemId) &&
       (!filters.shopId || l.shopId === filters.shopId) &&
-      (!filters.categoryId || l.categoryId === filters.categoryId),
+      (!categoryIds || categoryIds.includes(l.categoryId)),
   );
   const entries = new Map<string, Doc<"entries">>();
   for (const line of lines) {
@@ -186,6 +203,12 @@ export const exportCsv = adminMutation({
       return cache.get(id) as T;
     };
     const properties = new Map<string, string>(ctx.admin.properties.map((p) => [p._id, p.name]));
+    const categoryNames = categoryLabels(
+      await ctx.db
+        .query("categories")
+        .withIndex("by_org_order", (q) => q.eq("organizationId", ctx.admin.organization._id))
+        .collect(),
+    );
     const rows: (string | number)[][] = [
       ["Date", "Time", "For", "Shop", "Shop type", "Category", "Item", "Variant", "Quantity", "Unit", "Pack", "Pack count", "Total (Rs)", "Price per unit (Rs)", "Entered by", "Note", "Entry"],
     ];
@@ -196,7 +219,6 @@ export const exportCsv = adminMutation({
       const entry = entries.get(line.entryId)!;
       const item = await get(line.itemId, () => ctx.db.get(line.itemId));
       const shop = await get(line.shopId, () => ctx.db.get(line.shopId));
-      const category = await get(line.categoryId, () => ctx.db.get(line.categoryId));
       const user = await get(entry.createdBy, () => ctx.db.get(entry.createdBy));
       rows.push([
         istDay(line.loggedAt),
@@ -204,7 +226,7 @@ export const exportCsv = adminMutation({
         line.propertyId ? (properties.get(line.propertyId) ?? "") : "Shared",
         shop?.name ?? "",
         shop ? SHOP_TYPE_NAMES[shop.type] : "",
-        category?.name ?? "",
+        categoryNames.get(line.categoryId) ?? "",
         item?.name ?? "",
         line.variant ?? "",
         line.quantity,
@@ -253,7 +275,7 @@ export const items = adminQuery({
       ctx.db.query("items").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).collect(),
       ctx.db.query("categories").withIndex("by_org_order", (q) => q.eq("organizationId", organizationId)).collect(),
     ]);
-    const categoryName = new Map<string, string>(categories.map((c) => [c._id, c.name]));
+    const categoryName = categoryLabels(categories);
     const since = Date.now() - 30 * 86_400_000;
     return await Promise.all(
       allItems
@@ -295,7 +317,12 @@ export const item = adminQuery({
     const { from, to } = checkRange(args.fromDate, args.toDate);
     const item = await ctx.db.get(args.itemId);
     if (item === null || item.organizationId !== organizationId) return null;
-    const category = await ctx.db.get(item.categoryId);
+    const categoryNames = categoryLabels(
+      await ctx.db
+        .query("categories")
+        .withIndex("by_org_order", (q) => q.eq("organizationId", organizationId))
+        .collect(),
+    );
     const all = (await itemLines(ctx, item._id)).filter((l) => scope === "all" || l.scopeKey === scope);
     // Lines of deleted entries are already marked deleted; double-check the entry.
     const inRange = all.filter((l) => l.loggedAt >= from && l.loggedAt < to);
@@ -323,7 +350,7 @@ export const item = adminQuery({
         baseUnit: item.baseUnit,
         aliases: item.aliases,
         variants: item.variants,
-        categoryName: category?.name ?? "",
+        categoryName: categoryNames.get(item.categoryId) ?? "",
         archived: item.archived,
         verified: item.status === "verified",
       },

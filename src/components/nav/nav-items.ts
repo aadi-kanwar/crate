@@ -8,6 +8,7 @@ import {
   UserRound,
   Users,
   ScrollText,
+  ShoppingCart,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,9 +22,10 @@ export type NavItem = {
 
 export const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Entries", icon: ReceiptText },
+  { href: "/admin/shopping", label: "Shopping list", icon: ShoppingCart },
   { href: "/admin/items", label: "Items", icon: ShoppingBasket },
   { href: "/admin/lists", label: "Lists", icon: ListChecks },
-  { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/users", label: "Users", icon: Users, mobile: false },
   { href: "/admin/audit", label: "Audit log", icon: ScrollText, mobile: false },
   { href: "/admin/settings", label: "Settings", icon: Settings, mobile: false },
 ];
@@ -32,5 +34,6 @@ export const ADMIN_NAV: NavItem[] = [
 export const MEMBER_NAV: NavItem[] = [
   { href: "/me", label: "Home", icon: House },
   { href: "/me/new", label: "New entry", icon: SquarePlus },
+  { href: "/me/shopping", label: "Shopping list", icon: ShoppingCart },
   { href: "/me/account", label: "Account", icon: UserRound },
 ];

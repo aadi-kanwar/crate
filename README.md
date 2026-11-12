@@ -42,11 +42,14 @@ own Convex project**, Tailwind 4 with MealSync's tokens and components
 ## Master lists (organisation-wide; **Lists** screen)
 
 - **Categories:** start with Grocery, Fruits & Vegetables, Dairy, Kitchen
-  Supplies, Utility (LPG). Admins add, rename, reorder and archive them.
+  Supplies, Utility (LPG). Admins add, rename, reorder and archive them, and
+  add **sub-categories** one level deep (Grocery › Pulses); filtering by a
+  category includes its sub-categories.
 - **Items:** name, category, the unit it's counted in (kg, litre, piece,
   dozen, cylinder; fixed once bought), other names in any language (search
   matches them: "tamatar" finds Tomato), optional pack sizes ("500 ml
-  packet" = 0.5 litre) and variants ("Toned", "Aashirvaad").
+  packet" = 0.5 litre), variants ("Toned", "Aashirvaad") and a **default
+  shop** (where it's usually bought; shopping lists start with it).
 - **Shops:** name, type (Wholesaler, Kirana, Mandi / Vendor, Dairy, LPG
   agency, Other) and an optional area or note.
 - Managers and kitchen staff can add an item or shop while entering; it is
@@ -54,6 +57,25 @@ own Convex project**, Tailwind 4 with MealSync's tokens and components
   or **merges** it into the item/shop it duplicates (every purchase moves
   over, the duplicate's name becomes an "other name", then it is removed).
 - Archived items and shops are hidden when entering but keep their history.
+
+## Shopping list
+
+One live list per property and one **Shared** list (everyone who works for a
+property uses its list; everyone uses the Shared list; admins use all).
+
+- **List** mode: add items from the master list with the quantity needed
+  (or a number of packs), the variant and the shop (pre-filled from the
+  item's **default shop**); optionally an expected price per unit.
+- **Buy** mode: tick items off with the amount paid, changing the quantity,
+  variant or shop if bought differently; the store button moves an item to
+  another shop. Ticked items gather under **Bought**.
+- **Save purchases** records the Bought items as entries, one per shop, with
+  the same checks, price check ("Did you mean…?") and audit log as New entry,
+  then clears the ticks. The items stay on the list for next time.
+- **Estimated bill per shop**, always shown: planned quantity × the typed
+  price, else the last price paid at that shop, else the last price paid
+  anywhere ("without a price" if never bought).
+- Sort by **Category** or **Shop**.
 
 ## Purchase entries
 

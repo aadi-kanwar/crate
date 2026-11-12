@@ -146,6 +146,7 @@ function NewItemForm({
   const [categoryId, setCategoryId] = useState<Id<"categories"> | "">(catalog.categories[0]?.categoryId ?? "");
   const [baseUnit, setBaseUnit] = useState<BaseUnit>("kg");
   const [alias, setAlias] = useState("");
+  const [defaultShopId, setDefaultShopId] = useState("");
   const [busy, setBusy] = useState(false);
   return (
     <form
@@ -156,7 +157,8 @@ function NewItemForm({
         setBusy(true);
         try {
           const aliases = alias.trim() ? [alias.trim()] : [];
-          const itemId = await addItem({ name, categoryId, baseUnit, aliases });
+          const shop = (defaultShopId || undefined) as Id<"shops"> | undefined;
+          const itemId = await addItem({ name, categoryId, baseUnit, aliases, defaultShopId: shop });
           onCreated({
             itemId,
             name: name.trim(),
@@ -165,6 +167,7 @@ function NewItemForm({
             aliases,
             packSizes: [],
             variants: [],
+            defaultShopId: shop ?? null,
             verified: false,
           });
           toast.success("Item added. An admin will check it.");
@@ -186,7 +189,7 @@ function NewItemForm({
           <NativeSelect {...p} value={categoryId} onChange={(e) => setCategoryId(e.target.value as Id<"categories">)}>
             {catalog.categories.map((c) => (
               <option key={c.categoryId} value={c.categoryId}>
-                {c.name}
+                {c.label}
               </option>
             ))}
           </NativeSelect>
@@ -198,6 +201,18 @@ function NewItemForm({
             {BASE_UNITS.map((u) => (
               <option key={u} value={u}>
                 {UNIT_LABEL[u].one}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
+      </Field>
+      <Field id="new-item-shop" label="Usually bought from (optional)">
+        {(p) => (
+          <NativeSelect {...p} value={defaultShopId} onChange={(e) => setDefaultShopId(e.target.value)}>
+            <option value="">Not sure</option>
+            {catalog.shops.map((sh) => (
+              <option key={sh.shopId} value={sh.shopId}>
+                {sh.name}
               </option>
             ))}
           </NativeSelect>
