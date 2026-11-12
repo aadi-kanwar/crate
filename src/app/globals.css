@@ -1,0 +1,202 @@
+@import "tailwindcss";
+
+/*
+ * Dine design tokens (in the Livoza style). These are the ONLY colours, type sizes, radii,
+ * shadows and durations available to components: Tailwind's default palette
+ * and scales are switched off below, so a one-off colour won't even compile
+ * into a class. See /design for a visual reference.
+ */
+
+:root {
+  /* Warm neutrals (Livoza: cream page, white cards, warm near-black text) */
+  --gray-0: #ffffff;
+  --gray-25: #f6f2ea; /* page background: cream */
+  --gray-50: #efe9de;
+  --gray-100: #e7e0d3;
+  --gray-200: #ddd5c6;
+  --gray-300: #c9bfae;
+  --gray-400: #a39a8b;
+  --gray-500: #6b645a; /* >= 4.5:1 on white and cream: the lightest neutral allowed for text */
+  --gray-600: #57514a;
+  --gray-700: #403b35;
+  --gray-800: #2a2723;
+  --gray-900: #1c1a17;
+
+  /* The one accent: Livoza's deep teal (primary actions and "Yes") */
+  --green-50: #e8f0ee;
+  --green-100: #d3e3df;
+  --green-200: #b2cdc6;
+  --green-600: #1f4f48; /* > 9:1 with white text */
+  --green-700: #183f3a;
+  --green-800: #12302c;
+  --green-500: #5f817a; /* soft teal: large italic accent words only (>= 3:1 on cream) */
+
+  /* Semantic colours (text colour on the matching subtle background is >= 4.5:1) */
+  --amber-50: #fdf6e7;
+  --amber-200: #f0d9a4;
+  --amber-700: #7a5200;
+  --red-50: #fdf1f0;
+  --red-200: #f3c5c0;
+  --red-600: #b3261e;
+  --red-700: #92201a;
+  --blue-50: #eef4fc;
+  --blue-200: #c4d8f2;
+  --blue-700: #1f5596;
+}
+
+@theme {
+  /* Switch off Tailwind's defaults so only our tokens exist. */
+  --color-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --font-*: initial;
+
+  --color-white: var(--gray-0);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  /* Surfaces and text */
+  --color-background: var(--gray-25);
+  --color-surface: var(--gray-0);
+  --color-subtle: var(--gray-50);
+  --color-muted: var(--gray-100);
+  --color-foreground: var(--gray-900);
+  --color-foreground-secondary: var(--gray-600);
+  --color-foreground-muted: var(--gray-500);
+  --color-border: var(--gray-200);
+  --color-border-strong: var(--gray-300);
+  --color-disabled: var(--gray-400);
+  --color-inverse: var(--gray-800);
+
+  /* Accent */
+  --color-primary: var(--green-600);
+  --color-primary-hover: var(--green-700);
+  --color-primary-active: var(--green-800);
+  --color-primary-foreground: var(--gray-0);
+  --color-primary-subtle: var(--green-50);
+  --color-primary-subtle-border: var(--green-200);
+  --color-primary-text: var(--green-700);
+  --color-primary-soft: var(--green-500);
+  --color-ring: var(--green-600);
+
+  /* Semantic */
+  --color-success: var(--green-700);
+  --color-success-subtle: var(--green-50);
+  --color-success-border: var(--green-200);
+  --color-warning: var(--amber-700);
+  --color-warning-subtle: var(--amber-50);
+  --color-warning-border: var(--amber-200);
+  --color-danger: var(--red-600);
+  --color-danger-hover: var(--red-700);
+  --color-danger-text: var(--red-700);
+  --color-danger-subtle: var(--red-50);
+  --color-danger-border: var(--red-200);
+  --color-info: var(--blue-700);
+  --color-info-subtle: var(--blue-50);
+  --color-info-border: var(--blue-200);
+
+  /* Typography: a sans for text, a serif for headings; seven sizes */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* Headings: a high-contrast display serif, with italic for accent words. */
+  --font-serif: var(--font-display-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.25rem;
+  /* Display: big serif headings only */
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 2.5rem;
+
+  /* Spacing: Tailwind's 4px base (p-1 = 4px, p-4 = 16px). */
+  --spacing: 0.25rem;
+
+  /* Radii: two */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.875rem;
+  --radius-full: 9999px; /* only for small round indicators */
+
+  /* Shadows: used rarely */
+  --shadow-sm: 0 1px 2px 0 rgb(27 27 25 / 0.05);
+  --shadow-lg: 0 8px 24px -6px rgb(27 27 25 / 0.16);
+
+  /* Motion */
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  --animate-spin: spin 0.8s linear infinite;
+  --animate-pulse: pulse 1.6s ease-in-out infinite;
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.5;
+    }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    /* Nothing on the page may make it scroll sideways. */
+    overflow-x: clip;
+  }
+  body {
+    @apply bg-background text-foreground font-sans text-base antialiased;
+  }
+  /* Visible keyboard focus everywhere. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+  ::selection {
+    @apply bg-primary-subtle;
+  }
+}
+
+/*
+ * Phones (iPhone especially) zoom the page in when a text box or dropdown
+ * with text under 16px is tapped, leaving it slightly scrollable sideways
+ * and up and down. On touch screens, form controls are never smaller.
+ */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(1rem, 16px) !important;
+  }
+}
+
+/* Counts line up in tables and stat cards. */
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  body {
+    @apply bg-white;
+  }
+}
