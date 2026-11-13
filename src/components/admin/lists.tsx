@@ -10,6 +10,7 @@ import { matchesSearch } from "@convex/lib/purchases";
 import { BASE_UNITS, SHOP_TYPES, type BaseUnit, type ShopType } from "@convex/lib/validators";
 import { CategorySelect } from "@/components/app/category-select";
 import { CategoryTree } from "./category-tree";
+import { SimilarItems, useEarlierPrice } from "@/components/app/item-helpers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
@@ -25,7 +26,7 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toaster";
 import { useQuery } from "@/lib/convex";
 import { friendlyError } from "@/lib/errors";
-import { formatDateTime, parseDecimal } from "@/lib/format";
+import { formatDateTime, formatUnitPrice, parseDecimal } from "@/lib/format";
 import { SHOP_TYPE_LABEL, UNIT_LABEL } from "@/lib/labels";
 
 type Lists = FunctionReturnType<typeof api.catalog.lists>;
@@ -167,6 +168,9 @@ function ItemRows({ items, lists, review = false }: { items: Item[]; lists: List
                 {item.categoryName} · per {UNIT_LABEL[item.baseUnit].one} · {item.lineCount} {item.lineCount === 1 ? "purchase" : "purchases"}
                 {item.aliases.length > 0 ? ` · also “${item.aliases.join("”, “")}”` : ""}
                 {item.defaultShopName ? ` · usually from ${item.defaultShopName}` : ""}
+                {item.referencePrice && item.lineCount === 0
+                  ? ` · earlier price ${formatUnitPrice(item.referencePrice.unitPricePaise, item.baseUnit)}`
+                  : ""}
               </span>
               {review ? (
                 <span className="text-xs text-foreground-secondary">
@@ -212,6 +216,10 @@ function VerifyItem({ item }: { item: Item }) {
             packSizes: item.packSizes,
             variants: item.variants,
             defaultShopId: item.defaultShopId ?? undefined,
+            // Keep the earlier price as it is.
+            referencePrice: item.referencePrice
+              ? { unitPricePaise: item.referencePrice.unitPricePaise, shopId: item.referencePrice.shopId, date: item.referencePrice.date }
+              : undefined,
             archived: item.archived,
             verify: true,
           });
@@ -245,6 +253,11 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
   const [archived, setArchived] = useState(false);
   const [defaultShopId, setDefaultShopId] = useState("");
   const [busy, setBusy] = useState(false);
+  const earlier = useEarlierPrice(
+    UNIT_LABEL[baseUnit].one,
+    lists.shops.filter((sh) => !sh.archived),
+    item?.referencePrice ?? null,
+  );
   const liveShops = lists.shops.filter((sh) => !sh.archived || sh.shopId === item?.defaultShopId);
   const liveCategories = lists.categories.filter((c) => !c.archived || c.categoryId === item?.categoryId);
   const reset = () => {
@@ -256,6 +269,7 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
     setPacks(item?.packSizes.map((p) => ({ label: p.label, quantity: String(p.quantity) })) ?? []);
     setArchived(item?.archived ?? false);
     setDefaultShopId(item?.defaultShopId ?? "");
+    earlier.reset(item?.referencePrice ?? null);
   };
   return (
     <Dialog
@@ -293,6 +307,10 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
               }
               packSizes.push({ label: p.label, quantity });
             }
+            if (earlier.value === null) {
+              toast.error("Enter the earlier price in rupees, or untick it.");
+              return;
+            }
             setBusy(true);
             try {
               const fields = {
@@ -303,6 +321,9 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
                 variants: splitList(variants),
                 packSizes,
                 defaultShopId: (defaultShopId || undefined) as Id<"shops"> | undefined,
+                referencePrice: earlier.value
+                  ? { unitPricePaise: earlier.value.unitPricePaise, shopId: earlier.value.shopId as Id<"shops"> | undefined, date: earlier.value.date }
+                  : undefined,
               };
               if (item) await updateItem({ ...fields, itemId: item.itemId, archived, verify: false });
               else await createItem(fields);
@@ -318,6 +339,12 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
           <Field id="item-name" label="Name">
             {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} required />}
           </Field>
+          {item ? null : (
+            <SimilarItems
+              name={name}
+              items={lists.items.map((i) => ({ id: i.itemId, name: i.name, aliases: i.aliases, hint: i.categoryName, archived: i.archived }))}
+            />
+          )}
           <CategorySelect
             categories={liveCategories}
             value={categoryId}
@@ -394,6 +421,7 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
               Add pack size
             </Button>
           </fieldset>
+          {earlier.fields("item-earlier")}
           {item ? (
             <label className="flex min-h-11 items-center gap-3 text-sm">
               <input type="checkbox" className="size-5 accent-primary" checked={archived} onChange={(e) => setArchived(e.target.checked)} />

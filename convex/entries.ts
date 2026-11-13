@@ -174,6 +174,11 @@ async function recentUnitPrices(
     prices.push(line.unitPricePaise);
     if (prices.length >= PRICE_CHECK_HISTORY) break;
   }
+  // Never bought through Crate yet: compare with the earlier price typed in, if any.
+  if (prices.length === 0) {
+    const reference = (await ctx.db.get(itemId))?.referencePrice;
+    if (reference) prices.push(reference.unitPricePaise);
+  }
   return prices;
 }
 

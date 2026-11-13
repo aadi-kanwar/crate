@@ -259,7 +259,13 @@ function ListMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog
                         {row.estimateUnitPricePaise !== null ? (
                           <span className="block text-xs text-foreground-secondary">
                             {formatUnitPrice(row.estimateUnitPricePaise, row.baseUnit)}
-                            {row.estimateSource === "typed" ? "" : row.estimateSource === "this_shop" ? " last time" : " elsewhere"}
+                            {row.estimateSource === "typed"
+                              ? ""
+                              : row.lastPurchase?.beforeCrate
+                                ? " earlier price"
+                                : row.estimateSource === "this_shop"
+                                  ? " last time"
+                                  : " elsewhere"}
                           </span>
                         ) : null}
                       </span>
@@ -526,9 +532,10 @@ function BuyMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog;
                           <span className="tabular text-sm text-foreground-secondary">
                             {row.lastPurchase ? (
                               <>
-                                Last:{" "}
+                                {row.lastPurchase.beforeCrate ? "Earlier price:" : "Last:"}{" "}
                                 <span className="font-medium text-foreground">{formatUnitPrice(row.lastPurchase.unitPricePaise, row.baseUnit)}</span>
-                                {` · ${row.lastPurchase.shopName} · ${formatShortDate(row.lastPurchase.loggedAt)}`}
+                                {row.lastPurchase.shopName ? ` · ${row.lastPurchase.shopName}` : ""}
+                                {` · ${formatShortDate(row.lastPurchase.loggedAt)}`}
                                 {row.lastPurchase.variant && !row.variant ? ` · ${row.lastPurchase.variant}` : ""}
                               </>
                             ) : (
