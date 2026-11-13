@@ -5,6 +5,7 @@ import {
   matchesSearch,
   median,
   rupeesToPaise,
+  similarItems,
   unitPricePaise,
   withinEditWindow,
 } from "../lib/purchases";
@@ -115,5 +116,31 @@ describe("search", () => {
     expect(matchesSearch("टमा", "Tomato", ["tamatar", "टमाटर"])).toBe(true);
     expect(matchesSearch("toned milk", "Milk", ["toned milk"])).toBe(true);
     expect(matchesSearch("onion", "Tomato", ["tamatar"])).toBe(false);
+  });
+});
+
+
+describe("similar item names", () => {
+  const items = [
+    { name: "Tomato", aliases: ["tamatar", "टमाटर"] },
+    { name: "Toor dal", aliases: ["arhar dal"] },
+    { name: "Moong dal", aliases: [] },
+    { name: "Milk", aliases: ["doodh"] },
+    { name: "Potato", aliases: ["aloo"] },
+  ];
+  const names = (typed: string) => similarItems(typed, items).map((i) => i.name);
+
+  test("finds the same thing written differently", () => {
+    expect(names("tomato")).toContain("Tomato");
+    expect(names("Tamaatar")).toEqual(["Tomato"]); // one letter off an other name
+    expect(names("toor  daal")).toContain("Toor dal");
+    expect(names("Dal")).toEqual(expect.arrayContaining(["Toor dal", "Moong dal"]));
+    expect(names("doodh")).toEqual(["Milk"]);
+    expect(names("Arhar")).toEqual(["Toor dal"]);
+  });
+
+  test("ignores unrelated names and very short input", () => {
+    expect(names("Onion")).toEqual([]);
+    expect(names("a")).toEqual([]);
   });
 });

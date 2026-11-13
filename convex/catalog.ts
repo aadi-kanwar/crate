@@ -25,9 +25,11 @@ import {
 } from "./lib/functions";
 import { categoryLabels, countsWithSubcategories, orderedCategories } from "./lib/categories";
 import { MAX_QUANTITY, searchKey, tidyQuantity } from "./lib/purchases";
+import { isIsoDate } from "./lib/history";
 import {
   vBaseUnit,
   vPackSize,
+  vReferencePrice,
   vShopType,
   type PackSize,
 } from "./lib/validators";
@@ -149,6 +151,7 @@ const itemSnapshot = (item: Doc<"items">) => ({
   packSizes: item.packSizes,
   variants: item.variants,
   defaultShopId: item.defaultShopId ?? null,
+  referencePrice: item.referencePrice ?? null,
   status: item.status,
   archived: item.archived,
 });
@@ -192,6 +195,7 @@ export const forEntry = memberQuery({
           packSizes: i.packSizes,
           variants: i.variants,
           defaultShopId: i.defaultShopId ?? null,
+          referencePrice: i.referencePrice ?? null,
           verified: i.status === "verified",
         })),
       shops: (await shopsOf(ctx, organizationId))
@@ -216,6 +220,7 @@ export const addItem = memberMutation({
     baseUnit: vBaseUnit,
     aliases: v.optional(v.array(v.string())),
     defaultShopId: v.optional(v.id("shops")),
+    referencePrice: v.optional(vReferencePrice),
   },
   handler: async (ctx, args) => {
     const organizationId = ctx.member.organization._id;
@@ -223,6 +228,7 @@ export const addItem = memberMutation({
     const category = await loadCategory(ctx, organizationId, args.categoryId);
     if (category.archived) throw appError("INVALID_INPUT", "That category is archived.");
     const defaultShopId = await checkDefaultShop(ctx, organizationId, args.defaultShopId);
+    const referencePrice = await checkReferencePrice(ctx, organizationId, args.referencePrice);
     assertNewName(await itemsOf(ctx, organizationId), name, "an item");
     const itemId = await ctx.db.insert("items", {
       organizationId,
@@ -233,6 +239,7 @@ export const addItem = memberMutation({
       packSizes: [],
       variants: [],
       defaultShopId,
+      referencePrice,
       status: ctx.member.isAdmin ? "verified" : "unverified",
       archived: false,
       createdBy: ctx.member.userId,
@@ -341,6 +348,8 @@ export const lists = adminQuery({
           variants: i.variants,
           defaultShopId: i.defaultShopId ?? null,
           defaultShopName: i.defaultShopId ? (shopName.get(i.defaultShopId) ?? null) : null,
+          referencePrice: i.referencePrice ?? null,
+          referenceShopName: i.referencePrice?.shopId ? (shopName.get(i.referencePrice.shopId) ?? null) : null,
           verified: i.status === "verified",
           archived: i.archived,
           lineCount: linesPerItem.get(i._id) ?? 0,
@@ -513,7 +522,24 @@ const vItemFields = {
   variants: v.array(v.string()),
   /** The shop it is usually bought from; leave out for none. */
   defaultShopId: v.optional(v.id("shops")),
+  /** A price known from before Crate; leave out for none. */
+  referencePrice: v.optional(vReferencePrice),
 };
+
+/** A sensible earlier price (above zero, a real past date, a shop of this organisation), or none. */
+async function checkReferencePrice(
+  ctx: Db,
+  organizationId: Id<"organizations">,
+  price: { unitPricePaise: number; shopId?: Id<"shops">; date?: string } | undefined,
+) {
+  if (price === undefined) return undefined;
+  if (!Number.isSafeInteger(price.unitPricePaise) || price.unitPricePaise <= 0 || price.unitPricePaise > 100_000_000)
+    throw appError("INVALID_INPUT", "Enter the earlier price above zero, or leave it empty.");
+  if (price.date !== undefined && (!isIsoDate(price.date) || price.date > new Date().toISOString().slice(0, 10)))
+    throw appError("INVALID_DATE", "The earlier price's date can't be in the future.");
+  if (price.shopId !== undefined) await loadShop(ctx, organizationId, price.shopId);
+  return { unitPricePaise: price.unitPricePaise, shopId: price.shopId, date: price.date };
+}
 
 /** A default shop of this organisation that isn't archived (or none). */
 async function checkDefaultShop(ctx: Db, organizationId: Id<"organizations">, shopId: Id<"shops"> | undefined, current?: Id<"shops">) {
@@ -533,6 +559,7 @@ async function cleanItemFields(
     packSizes: PackSize[];
     variants: string[];
     defaultShopId?: Id<"shops">;
+    referencePrice?: { unitPricePaise: number; shopId?: Id<"shops">; date?: string };
   },
   currentShop?: Id<"shops">,
 ) {
@@ -545,6 +572,7 @@ async function cleanItemFields(
     packSizes: cleanPacks(args.packSizes),
     variants: cleanList(args.variants, "variant"),
     defaultShopId: await checkDefaultShop(ctx, organizationId, args.defaultShopId, currentShop),
+    referencePrice: await checkReferencePrice(ctx, organizationId, args.referencePrice),
   };
 }
 
@@ -650,6 +678,7 @@ export const mergeItem = adminMutation({
       variants: cleanList([...keep.variants, ...duplicate.variants], "variant"),
       packSizes: [...keep.packSizes, ...duplicate.packSizes.filter((p) => !packLabels.has(searchKey(p.label)))],
       defaultShopId: keep.defaultShopId ?? duplicate.defaultShopId,
+      referencePrice: keep.referencePrice ?? duplicate.referencePrice,
     });
     await ctx.db.delete(duplicate._id);
     await writeAudit(ctx, {

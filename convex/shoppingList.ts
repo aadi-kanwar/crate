@@ -129,7 +129,19 @@ export const get = memberQuery({
       (await rowsOf(ctx, organizationId, scopeKey)).map(async (row) => {
         const item = (await ctx.db.get(row.itemId))!;
         const top = categories.find((c) => c._id === item.categoryId);
-        const history = await priceHistory(ctx, row.itemId);
+        const bought = await priceHistory(ctx, row.itemId);
+        // Never bought through Crate: the earlier price typed in stands in for a purchase.
+        const history =
+          bought.length === 0 && item.referencePrice
+            ? [
+                {
+                  shopId: (item.referencePrice.shopId ?? "") as string,
+                  variant: undefined,
+                  unitPricePaise: item.referencePrice.unitPricePaise,
+                  loggedAt: item.referencePrice.date ? Date.parse(`${item.referencePrice.date}T12:00:00+05:30`) : item.createdAt,
+                },
+              ]
+            : bought;
         const expected = expectedUnitPrice(
           { variant: row.variant, shopId: row.shopId, expectedUnitPricePaise: row.expectedUnitPricePaise },
           history,
@@ -162,9 +174,11 @@ export const get = memberQuery({
           lastPurchase: last
             ? {
                 unitPricePaise: last.unitPricePaise,
-                shopName: (await shopName(last.shopId as Id<"shops">)) ?? "",
+                shopName: last.shopId ? ((await shopName(last.shopId as Id<"shops">)) ?? "") : "",
                 loggedAt: last.loggedAt,
                 variant: last.variant ?? null,
+                /** True when it's the earlier price typed in when adding the item, not a purchase. */
+                beforeCrate: bought.length === 0,
               }
             : null,
           bought: row.bought

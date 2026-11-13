@@ -6,6 +6,7 @@ import {
   vMemberRole,
   vPackSize,
   vRecordStatus,
+  vReferencePrice,
   vRole,
   vShopType,
   vVerification,
@@ -104,6 +105,8 @@ export default defineSchema({
     variants: v.array(v.string()),
     /** The shop it is usually bought from (pre-filled on shopping lists). */
     defaultShopId: v.optional(v.id("shops")),
+    /** A price known from before Crate (optional); see vReferencePrice. */
+    referencePrice: v.optional(vReferencePrice),
     status: vVerification,
     archived: v.boolean(),
     createdBy: v.optional(v.id("users")),

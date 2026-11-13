@@ -9,6 +9,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { matchesSearch } from "@convex/lib/purchases";
 import { BASE_UNITS, SHOP_TYPES, type BaseUnit, type ShopType } from "@convex/lib/validators";
 import { CategorySelect } from "@/components/app/category-select";
+import { SimilarItems, useEarlierPrice } from "@/components/app/item-helpers";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
@@ -80,6 +81,10 @@ export function ItemPicker({
             catalog={catalog}
             onCancel={() => setAdding(false)}
             onCreated={pick}
+            onUseExisting={(id) => {
+              const existing = catalog.items.find((i) => i.itemId === id);
+              if (existing) pick(existing);
+            }}
           />
         ) : (
           <>
@@ -136,11 +141,14 @@ function NewItemForm({
   catalog,
   onCancel,
   onCreated,
+  onUseExisting,
 }: {
   initialName: string;
   catalog: Catalog;
   onCancel: () => void;
   onCreated: (item: CatalogItem) => void;
+  /** Pick an existing look-alike item instead of making a new one. */
+  onUseExisting: (itemId: string) => void;
 }) {
   const addItem = useMutation(api.catalog.addItem);
   const [name, setName] = useState(initialName.trim());
@@ -149,17 +157,23 @@ function NewItemForm({
   const [alias, setAlias] = useState("");
   const [defaultShopId, setDefaultShopId] = useState("");
   const [busy, setBusy] = useState(false);
+  const earlier = useEarlierPrice(UNIT_LABEL[baseUnit].one, catalog.shops);
+  const categoryLabel = new Map<string, string>(catalog.categories.map((c) => [c.categoryId, c.label]));
   return (
     <form
       className="flex flex-col gap-4"
       onSubmit={async (e) => {
         e.preventDefault();
         if (!categoryId) return;
+        if (earlier.value === null) return toast.error("Enter the earlier price in rupees, or untick it.");
         setBusy(true);
         try {
           const aliases = alias.trim() ? [alias.trim()] : [];
           const shop = (defaultShopId || undefined) as Id<"shops"> | undefined;
-          const itemId = await addItem({ name, categoryId, baseUnit, aliases, defaultShopId: shop });
+          const referencePrice = earlier.value
+            ? { unitPricePaise: earlier.value.unitPricePaise, shopId: earlier.value.shopId as Id<"shops"> | undefined, date: earlier.value.date }
+            : undefined;
+          const itemId = await addItem({ name, categoryId, baseUnit, aliases, defaultShopId: shop, referencePrice });
           onCreated({
             itemId,
             name: name.trim(),
@@ -169,6 +183,7 @@ function NewItemForm({
             packSizes: [],
             variants: [],
             defaultShopId: shop ?? null,
+            referencePrice: referencePrice ?? null,
             verified: false,
           });
           toast.success("Item added. An admin will check it.");
@@ -182,6 +197,11 @@ function NewItemForm({
       <Field id="new-item-name" label="Item name">
         {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} autoFocus required />}
       </Field>
+      <SimilarItems
+        name={name}
+        items={catalog.items.map((i) => ({ id: i.itemId, name: i.name, aliases: i.aliases, hint: categoryLabel.get(i.categoryId) }))}
+        onUse={onUseExisting}
+      />
       <Field id="new-item-alias" label="Other name (optional)" hint="What you call it, in any language, e.g. tamatar.">
         {(p) => <Input {...p} value={alias} onChange={(e) => setAlias(e.target.value)} />}
       </Field>
@@ -216,6 +236,7 @@ function NewItemForm({
           </NativeSelect>
         )}
       </Field>
+      {earlier.fields("new-item-earlier")}
       <DialogFooter>
         <Button type="button" variant="ghost" onClick={onCancel}>
           Back

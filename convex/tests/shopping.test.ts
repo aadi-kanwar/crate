@@ -297,3 +297,39 @@ describe("reordering categories by drag and drop", () => {
     expect(audit.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("earlier price for a new item", () => {
+  test("fills in for estimates, the Last price and the price check until it's bought; kept when verifying", async () => {
+    const c = await setup();
+    const categoryId = await firstCategory(c.t, c.admin);
+    const ghee = await c.member.as.mutation(api.catalog.addItem, {
+      name: "Ghee", categoryId, baseUnit: "kg", referencePrice: { unitPricePaise: 60_000, shopId: c.kirana, date: "2027-03-01" },
+    });
+    expect((await c.t.run((ctx) => ctx.db.get(ghee)))?.referencePrice).toMatchObject({ unitPricePaise: 60_000, date: "2027-03-01" });
+    // Not a purchase: no entry or line was made.
+    expect(await c.t.run((ctx) => ctx.db.query("entryLines").withIndex("by_item_loggedAt", (q) => q.eq("itemId", ghee)).collect())).toHaveLength(0);
+    const rowId = await c.member.as.mutation(api.shoppingList.add, { scope: c.main, itemId: ghee, quantity: 2 });
+    let row = (await c.member.as.query(api.shoppingList.get, { scope: c.main })).rows.find((r) => r.rowId === rowId)!;
+    expect(row).toMatchObject({ estimatePaise: 120_000 });
+    expect(row.lastPurchase).toMatchObject({ unitPricePaise: 60_000, shopName: "Sharma Kirana", beforeCrate: true });
+    // The price check compares with it: ₹6,000/kg typed by mistake is questioned.
+    expect(await c.member.as.query(api.entries.checkPrices, { lines: [{ itemId: ghee, unitPricePaise: 600_000 }] })).toEqual([{ status: "high", medianPaise: 60_000 }]);
+    // Verifying (as the Lists screen does) keeps it.
+    await c.admin.as.mutation(api.catalog.updateItem, {
+      itemId: ghee, name: "Ghee", categoryId, baseUnit: "kg", aliases: [], packSizes: [], variants: [], archived: false, verify: true,
+      referencePrice: { unitPricePaise: 60_000, shopId: c.kirana, date: "2027-03-01" },
+    });
+    expect((await c.t.run((ctx) => ctx.db.get(ghee)))?.referencePrice?.unitPricePaise).toBe(60_000);
+    // Once really bought, the real price takes over.
+    await c.member.as.mutation(api.entries.create, { scope: c.main, shopId: c.kirana, lines: [{ itemId: ghee, quantity: 1, totalPaise: 62_000 }], pricesConfirmed: true });
+    row = (await c.member.as.query(api.shoppingList.get, { scope: c.main })).rows.find((r) => r.rowId === rowId)!;
+    expect(row.lastPurchase).toMatchObject({ unitPricePaise: 62_000, beforeCrate: false });
+  });
+
+  test("a future date or a zero price is refused", async () => {
+    const c = await setup();
+    const categoryId = await firstCategory(c.t, c.admin);
+    expect(await errorCode(c.member.as.mutation(api.catalog.addItem, { name: "Ghee", categoryId, baseUnit: "kg", referencePrice: { unitPricePaise: 60_000, date: "2099-01-01" } }))).toBe("INVALID_DATE");
+    expect(await errorCode(c.member.as.mutation(api.catalog.addItem, { name: "Ghee", categoryId, baseUnit: "kg", referencePrice: { unitPricePaise: 0 } }))).toBe("INVALID_INPUT");
+  });
+});

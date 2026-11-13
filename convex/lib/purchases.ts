@@ -121,3 +121,63 @@ export function matchesSearch(
     );
   });
 }
+
+/** Letters and digits only, lower case: "Toor Dal (loose)" → "toordalloose". */
+function squash(text: string): string {
+  return searchKey(text).replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/** How many single-letter changes turn `a` into `b` (stops early past `max`). */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]);
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Existing items whose name or other name looks like `name`: one contains
+ * the other, a word starts the same, or they differ by a letter or two
+ * ("Tamaatar" ~ "tamatar"). Best matches first, at most `limit`.
+ */
+export function similarItems<T extends { name: string; aliases: readonly string[] }>(
+  name: string,
+  items: readonly T[],
+  limit = 5,
+): T[] {
+  const typed = squash(name);
+  if (typed.length < 2) return [];
+  const typedWords = searchKey(name).split(" ").filter((w) => w.length >= 3);
+  const scored: { item: T; score: number }[] = [];
+  for (const item of items) {
+    let best = 0;
+    for (const text of [item.name, ...item.aliases]) {
+      const other = squash(text);
+      if (!other) continue;
+      let score = 0;
+      if (other === typed) score = 100;
+      else if (other.includes(typed) || (typed.includes(other) && other.length >= 3)) score = 80;
+      else {
+        const max = typed.length >= 7 ? 2 : typed.length >= 4 ? 1 : 0;
+        if (max > 0 && editDistance(typed, other, max) <= max) score = 70;
+        else if (typedWords.some((w) => searchKey(text).split(/[\s\-/(),.]+/).some((p) => p.startsWith(w) || w.startsWith(p) && p.length >= 3)))
+          score = 50;
+      }
+      best = Math.max(best, score);
+    }
+    if (best > 0) scored.push({ item, score: best });
+  }
+  return scored
+    .sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name))
+    .slice(0, limit)
+    .map((s) => s.item);
+}

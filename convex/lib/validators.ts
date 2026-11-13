@@ -66,3 +66,15 @@ export const vPackSize = v.object({
   quantity: v.number(), // in the item's base unit, e.g. 0.5
 });
 export type PackSize = Infer<typeof vPackSize>;
+
+/**
+ * A price known from before the item was bought through Crate (typed by
+ * the person adding the item). Not a purchase: it only fills in until real
+ * purchases exist (estimates, price check, "Last" price).
+ */
+export const vReferencePrice = v.object({
+  unitPricePaise: v.number(), // per base unit
+  shopId: v.optional(v.id("shops")),
+  date: v.optional(v.string()), // YYYY-MM-DD, when that price was paid
+});
+export type ReferencePrice = Infer<typeof vReferencePrice>;
