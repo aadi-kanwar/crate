@@ -184,3 +184,24 @@ npm run typecheck
 npm test              # backend tests (no deployment needed)
 npm run codegen:offline
 ```
+
+## Livoza Hub for everyone
+
+The Livoza Hub is the one sign-in for everyone, not only master admins. It
+owns people, their profile types and properties; Crate keeps its own rules
+for the role the hub gives (the hub's `tools.config.ts`).
+
+- **Tickets** (`/sso`): any profile type. Crate makes itself match the ticket
+  (role, properties) and opens a 12-hour login.
+  When it ends, people are sent back to the hub, which opens Crate again.
+  The older master-admin-only tickets still work.
+- **Sync** (`POST /sso/sync`, audience `crate-sync`): the hub sends every change
+  to a person or property. Crate applies it as "make it so"
+  (`convex/lib/hubSync.ts`); switched-off people lose access but their
+  history is kept. Rows store the hub's ids (`users.hubUserId`,
+  `properties.hubPropertyId`).
+- **Export** (`POST /sso/export`, audience `crate-export`): for the hub's
+  one-time import (people, roles as hub profile types, properties, and
+  password hashes so people keep their password).
+- **`HUB_ONLY=true`** on the Convex deployment switches off Crate's own
+  sign-in once everyone uses the hub; the sign-in page sends people there.

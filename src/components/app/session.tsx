@@ -65,7 +65,7 @@ export function AdminHubLink() {
       className="inline-flex shrink-0 items-center gap-1 rounded-sm text-xs font-medium text-foreground-secondary hover:text-foreground"
     >
       <Icon icon={ArrowLeft} className="size-3.5" />
-      Admin Hub
+      Livoza Hub
     </a>
   );
 }

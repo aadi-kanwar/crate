@@ -19,6 +19,7 @@ export type AppErrorCode =
   | "INVALID_DATE"
   | "ORG_REQUIRED"
   | "SSO_LINK_EXPIRED"
+  | "USE_HUB"
   | "EDIT_WINDOW_CLOSED"
   | "PRICE_CHECK_NEEDED";
 
@@ -41,7 +42,8 @@ export const DEFAULT_MESSAGES: Record<AppErrorCode, string> = {
   INVALID_DATE: "That date can't be used here.",
   ORG_REQUIRED: "Set up your organisation first.",
   // Deliberately the same for every Admin Hub sign-in failure: never say why.
-  SSO_LINK_EXPIRED: "This link has expired. Open it again from the Admin Hub.",
+  SSO_LINK_EXPIRED: "This link has expired. Open it again from the Livoza Hub.",
+  USE_HUB: "Crate now uses the Livoza Hub to sign in. Sign in there, then open Crate.",
   EDIT_WINDOW_CLOSED:
     "This entry is more than 24 hours old, so only an admin can change it now.",
   PRICE_CHECK_NEEDED:

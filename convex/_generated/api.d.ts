@@ -8,6 +8,11 @@
  * @module
  */
 
+import type {
+  ApiFromModules,
+  FilterApi,
+  FunctionReference,
+} from "convex/server";
 import type * as access from "../access.js";
 import type * as accounts from "../accounts.js";
 import type * as audit from "../audit.js";
@@ -25,6 +30,7 @@ import type * as lib_csv from "../lib/csv.js";
 import type * as lib_errors from "../lib/errors.js";
 import type * as lib_functions from "../lib/functions.js";
 import type * as lib_history from "../lib/history.js";
+import type * as lib_hubSync from "../lib/hubSync.js";
 import type * as lib_inputRules from "../lib/inputRules.js";
 import type * as lib_money from "../lib/money.js";
 import type * as lib_purchases from "../lib/purchases.js";
@@ -39,12 +45,14 @@ import type * as sso from "../sso.js";
 import type * as ssoNode from "../ssoNode.js";
 import type * as users from "../users.js";
 
-import type {
-  ApiFromModules,
-  FilterApi,
-  FunctionReference,
-} from "convex/server";
-
+/**
+ * A utility for referencing Convex functions in your app's API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = api.myModule.myFunction;
+ * ```
+ */
 declare const fullApi: ApiFromModules<{
   access: typeof access;
   accounts: typeof accounts;
@@ -63,6 +71,7 @@ declare const fullApi: ApiFromModules<{
   "lib/errors": typeof lib_errors;
   "lib/functions": typeof lib_functions;
   "lib/history": typeof lib_history;
+  "lib/hubSync": typeof lib_hubSync;
   "lib/inputRules": typeof lib_inputRules;
   "lib/money": typeof lib_money;
   "lib/purchases": typeof lib_purchases;
@@ -77,31 +86,11 @@ declare const fullApi: ApiFromModules<{
   ssoNode: typeof ssoNode;
   users: typeof users;
 }>;
-
-/**
- * A utility for referencing Convex functions in your app's public API.
- *
- * Usage:
- * ```js
- * const myFunctionReference = api.myModule.myFunction;
- * ```
- */
 export declare const api: FilterApi<
   typeof fullApi,
   FunctionReference<any, "public">
 >;
-
-/**
- * A utility for referencing Convex functions in your app's internal API.
- *
- * Usage:
- * ```js
- * const myFunctionReference = internal.myModule.myFunction;
- * ```
- */
 export declare const internal: FilterApi<
   typeof fullApi,
   FunctionReference<any, "internal">
 >;
-
-export declare const components: {};

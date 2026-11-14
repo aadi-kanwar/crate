@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { HubOnlyRedirect } from "@/components/app/hub-redirect";
 import { Brand } from "@/components/app/brand";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -68,6 +69,7 @@ export default function SignInPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-4 py-10">
+      <HubOnlyRedirect />
       <Brand size="lg" />
       <div className="flex flex-col gap-1">
         <h1 className="font-serif text-3xl tracking-tight">
