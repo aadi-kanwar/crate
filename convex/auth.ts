@@ -39,6 +39,8 @@ const PhonePassword = ConvexCredentials<DataModel>({
 
     const gate = await ctx.runMutation(internal.authLimits.checkAttempt, { phone });
     if (!gate.allowed) throw appError("TOO_MANY_ATTEMPTS");
+    // After the move to the Livoza Hub, everyone signs in there instead.
+    if (process.env.HUB_ONLY === "true") throw appError("USE_HUB");
     return await signInExisting(ctx, phone, password);
   },
   crypto: passwordCrypto,
@@ -56,6 +58,14 @@ const HubSso = ConvexCredentials<DataModel>({
   id: HUB_SSO_PROVIDER,
   authorize: async (params, ctx) => {
     const ticket = typeof params.ticket === "string" ? params.ticket : "";
+    // The Livoza Hub for everyone: any profile type.
+    const person = await ctx.runAction(internal.ssoNode.verifyPersonTicket, { ticket });
+    if (person !== null) {
+      const result = await ctx.runMutation(internal.sso.acceptPersonTicket, person);
+      if (result === null) throw appError("SSO_LINK_EXPIRED");
+      return result;
+    }
+    // The older master-admin-only ticket.
     const claims = await ctx.runAction(internal.ssoNode.verifyTicket, { ticket });
     if (claims === null) throw appError("SSO_LINK_EXPIRED");
     const result = await ctx.runMutation(internal.sso.acceptTicket, claims);

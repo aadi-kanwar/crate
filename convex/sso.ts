@@ -3,6 +3,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { internalMutation, viewerQuery } from "./lib/functions";
+import { applyHubPerson, ensureHubProperty, exportForHub } from "./lib/hubSync";
 import { SSO_SESSION_MS, SSO_USED_TICKET_RETENTION_MS } from "./lib/ssoTicket";
 
 /**
@@ -192,4 +193,102 @@ export const hubOrigin = viewerQuery({
   args: {},
   returns: v.union(v.string(), v.null()),
   handler: async () => process.env.HUB_ORIGIN ?? null,
+});
+
+/**
+ * Whether this app's own sign-in is switched off (HUB_ONLY=true, after the
+ * move to the Livoza Hub), and where to send people instead. Not secret.
+ */
+export const hubSettings = viewerQuery({
+  args: {},
+  returns: v.object({ hubOnly: v.boolean(), openUrl: v.union(v.string(), v.null()) }),
+  handler: async () => {
+    const origin = process.env.HUB_ORIGIN ?? null;
+    return {
+      hubOnly: process.env.HUB_ONLY === "true" && origin !== null,
+      openUrl: origin ? `${origin}/open/crate` : null,
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Livoza Hub for everyone (tickets for every profile type, sync, export).
+// ---------------------------------------------------------------------------
+
+const vHubPerson = {
+  hubUserId: v.string(),
+  phone: v.string(),
+  name: v.string(),
+  profileType: v.union(v.literal("admin"), v.literal("warden"), v.literal("staff"), v.literal("resident")),
+  role: v.union(v.string(), v.null()),
+  properties: v.union(v.literal("all"), v.array(v.object({ id: v.string(), name: v.string() }))),
+  roomNumber: v.union(v.string(), v.null()),
+};
+
+/**
+ * A ticket from the hub for any profile type: the app is made to match the
+ * hub, then a 12-hour login opens. When it ends, the app sends the person
+ * back to the hub, which opens it again.
+ */
+export const acceptPersonTicket = internalMutation({
+  args: { jti: v.string(), ...vHubPerson },
+  returns: v.union(v.null(), v.object({ userId: v.id("users"), sessionId: v.id("authSessions") })),
+  handler: async (ctx, { jti, ...person }) => {
+    const now = Date.now();
+    if (!(await spendJti(ctx, jti, now))) return null;
+    const userId = await applyHubPerson(ctx, person, { active: true, revoke: false });
+    if (userId === null) return null;
+    const user = await ctx.db.get(userId);
+    if (user === null || user.disabled === true || user.role === undefined) return null;
+    const sessionId = await ctx.db.insert("authSessions", { userId, expirationTime: now + SSO_SESSION_MS });
+    await writeAudit(ctx, {
+      organizationId: user.organizationId,
+      actorUserId: userId,
+      action: "sso.signed_in",
+      entityType: "users",
+      entityId: userId,
+      metadata: { hubUserId: person.hubUserId, role: person.role },
+    });
+    return { userId, sessionId };
+  },
+});
+
+/** A change from the hub's sync (a person or a property). False if the request was already used. */
+export const applySync = internalMutation({
+  args: {
+    jti: v.string(),
+    person: v.optional(v.object({ ...vHubPerson, active: v.boolean(), revoke: v.boolean() })),
+    property: v.optional(
+      v.object({
+        id: v.string(),
+        name: v.string(),
+        organizationName: v.string(),
+        toolPropertyId: v.union(v.string(), v.null()),
+      }),
+    ),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, { jti, person, property }) => {
+    if (!(await spendJti(ctx, jti, Date.now()))) return false;
+    if (person) {
+      const { active, revoke, ...rest } = person;
+      await applyHubPerson(ctx, rest, { active, revoke });
+    }
+    if (property) {
+      await ensureHubProperty(ctx, property, {
+        toolPropertyId: property.toolPropertyId,
+        organizationName: property.organizationName,
+      });
+    }
+    return true;
+  },
+});
+
+/** Everyone and every property, for the hub's import. Null if the request was already used. */
+export const exportForImport = internalMutation({
+  args: { jti: v.string() },
+  handler: async (ctx, { jti }) => {
+    if (!(await spendJti(ctx, jti, Date.now()))) return null;
+    return await exportForHub(ctx);
+  },
 });

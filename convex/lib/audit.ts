@@ -29,7 +29,9 @@ export type AuditAction =
   | "entry.deleted"
   | "report.exported"
   | "sso.signed_in"
-  | "sso.access_revoked";
+  | "sso.access_revoked"
+  | "hub.person_synced"
+  | "hub.property_linked";
 
 /**
  * Appends one entry to the admin audit log. Never put passwords, tokens or

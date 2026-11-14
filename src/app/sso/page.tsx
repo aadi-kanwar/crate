@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/states";
 import { useQuery } from "@/lib/convex";
 
 /**
- * Admin Hub single sign-on. The hub sends master admins here with a one-time
+ * Livoza Hub single sign-on. The hub sends everyone here with a one-time
  * ticket after "#ticket=" (the part after # never reaches any server log).
  * The ticket is removed from the address bar at once, then used to sign in.
  * Any failure shows the same message: the reason is never revealed.
@@ -38,7 +38,7 @@ export default function SsoPage() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center gap-6 px-4 py-6">
       <Brand size="lg" />
-      {failed ? <Expired /> : <Spinner label="Signing you in from the Admin Hub" />}
+      {failed ? <Expired /> : <Spinner label="Signing you in from the Livoza Hub" />}
     </main>
   );
 }
@@ -49,13 +49,13 @@ function Expired() {
     <EmptyState
       icon={Clock}
       title="This link has expired"
-      description="Open it again from the Admin Hub."
+      description="Open Crate again from the Livoza Hub."
       action={
         hubOrigin ? (
           <Button asChild variant="secondary">
-            <a href={hubOrigin}>
+            <a href={`${hubOrigin}/open/crate`}>
               <Icon icon={ArrowLeft} />
-              Back to the Admin Hub
+              Open from the Livoza Hub
             </a>
           </Button>
         ) : null
