@@ -17,11 +17,12 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { insertEntry, resolveScope, vScope, type Scope } from "./entries";
+import { checkSplit, insertEntry, resolveScope, splitPropertiesFor, vScope, type Scope } from "./entries";
+import { vSplit, type Split } from "./lib/validators";
 import { categoryLabels, categoryRank } from "./lib/categories";
 import { appError } from "./lib/errors";
 import { memberMutation, memberQuery, type MemberViewer } from "./lib/functions";
-import { lineQuantity, MAX_LINE_PAISE, MAX_LINES, unitPricePaise } from "./lib/purchases";
+import { isAllowedChoice, lineQuantity, MAX_LINE_PAISE, MAX_LINES, unitPricePaise } from "./lib/purchases";
 import { expectedUnitPrice, shopBills } from "./lib/shopping";
 
 type Db = Pick<QueryCtx, "db">;
@@ -33,6 +34,9 @@ const PRICE_HISTORY = 60;
 
 const vQuantityInput = {
   variant: v.optional(v.string()),
+  brand: v.optional(v.string()),
+  /** Shared list only: quantity for each property (adds up to the quantity). */
+  split: v.optional(vSplit),
   quantity: v.optional(v.number()),
   packLabel: v.optional(v.string()),
   packCount: v.optional(v.number()),
@@ -63,15 +67,20 @@ async function checkShop(ctx: Db, member: MemberViewer, shopId: Id<"shops"> | un
 /** Variant and quantity (direct or packs) for an item, or INVALID_INPUT. */
 function checkQuantity(
   item: Doc<"items">,
-  input: { variant?: string; quantity?: number; packLabel?: string; packCount?: number },
-  keepVariant?: string,
+  input: { variant?: string; brand?: string; quantity?: number; packLabel?: string; packCount?: number; split?: Split },
+  splitProperties: readonly Id<"properties">[] | null,
+  keep?: { variant?: string; brand?: string },
 ) {
   const variant = input.variant?.trim() || undefined;
-  if (variant !== undefined && !item.variants.includes(variant) && variant !== keepVariant)
+  if (!isAllowedChoice(variant, item.variants, keep?.variant))
     throw appError("INVALID_INPUT", `"${variant}" isn't a variant of ${item.name}.`);
+  const brand = input.brand?.trim() || undefined;
+  if (!isAllowedChoice(brand, item.brands ?? [], keep?.brand))
+    throw appError("INVALID_INPUT", `"${brand}" isn't a brand of ${item.name}.`);
   const quantity = lineQuantity(input, item.packSizes);
   if (quantity === null) throw appError("INVALID_INPUT", `Enter a quantity above zero for ${item.name}.`);
-  return { variant, ...quantity };
+  const split = checkSplit(input.split, quantity.quantity, splitProperties, item.name);
+  return { variant, brand, split, ...quantity };
 }
 
 function checkExpectedPrice(paise: number | undefined) {
@@ -155,6 +164,7 @@ export const get = memberQuery({
           baseUnit: item.baseUnit,
           packSizes: item.packSizes,
           variants: item.variants,
+          brands: item.brands ?? [],
           itemArchived: item.archived,
           categoryId: item.categoryId,
           categoryLabel: labels.get(item.categoryId) ?? "",
@@ -162,6 +172,8 @@ export const get = memberQuery({
           categoryRank: ranks.get(item.categoryId) ?? Number.MAX_SAFE_INTEGER,
           topCategoryId: top?.parentId ?? item.categoryId,
           variant: row.variant ?? null,
+          brand: row.brand ?? null,
+          split: row.split ?? [],
           quantity: row.quantity,
           packLabel: row.packLabel ?? null,
           packCount: row.packCount ?? null,
@@ -187,6 +199,8 @@ export const get = memberQuery({
                 packLabel: row.bought.packLabel ?? null,
                 packCount: row.bought.packCount ?? null,
                 variant: row.bought.variant ?? null,
+                brand: row.bought.brand ?? null,
+                split: row.bought.split ?? [],
                 shopId: row.bought.shopId,
                 shopName: (await shopName(row.bought.shopId)) ?? "",
                 totalPaise: row.bought.totalPaise,
@@ -240,12 +254,12 @@ export const add = memberMutation({
     const { scopeKey, propertyId } = resolveScope(member, args.scope);
     const item = await loadItem(ctx, member, args.itemId);
     if (item.archived) throw appError("INVALID_INPUT", `"${item.name}" is archived.`);
-    const { variant, quantity, packLabel, packCount } = checkQuantity(item, args);
+    const { variant, brand, split, quantity, packLabel, packCount } = checkQuantity(item, args, await splitPropertiesFor(ctx, organizationId, scopeKey));
     const existing = await rowsOf(ctx, organizationId, scopeKey);
     if (existing.length >= MAX_LIST_ROWS)
       throw appError("INVALID_INPUT", `A list can have at most ${MAX_LIST_ROWS} items.`);
-    if (existing.some((r) => r.itemId === item._id && (r.variant ?? null) === (variant ?? null)))
-      throw appError("CONFLICT", `${item.name}${variant ? ` (${variant})` : ""} is already on this list.`);
+    if (existing.some((r) => r.itemId === item._id && (r.variant ?? null) === (variant ?? null) && (r.brand ?? null) === (brand ?? null)))
+      throw appError("CONFLICT", `${item.name}${[variant, brand].filter(Boolean).length ? ` (${[variant, brand].filter(Boolean).join(", ")})` : ""} is already on this list.`);
     const shopId = await checkShop(
       ctx,
       member,
@@ -257,6 +271,8 @@ export const add = memberMutation({
       propertyId,
       itemId: item._id,
       variant,
+      brand,
+      split,
       quantity,
       packLabel,
       packCount,
@@ -282,16 +298,27 @@ export const update = memberMutation({
     const { member } = ctx;
     const row = await loadRow(ctx, member, args.rowId);
     const item = await loadItem(ctx, member, row.itemId);
-    const { variant, quantity, packLabel, packCount } = checkQuantity(item, args, row.variant);
+    const { variant, brand, split, quantity, packLabel, packCount } = checkQuantity(
+      item,
+      args,
+      await splitPropertiesFor(ctx, row.organizationId, row.scopeKey),
+      { variant: row.variant, brand: row.brand },
+    );
     if (
-      (variant ?? null) !== (row.variant ?? null) &&
+      ((variant ?? null) !== (row.variant ?? null) || (brand ?? null) !== (row.brand ?? null)) &&
       (await rowsOf(ctx, row.organizationId, row.scopeKey)).some(
-        (r) => r._id !== row._id && r.itemId === row.itemId && (r.variant ?? null) === (variant ?? null),
+        (r) =>
+          r._id !== row._id &&
+          r.itemId === row.itemId &&
+          (r.variant ?? null) === (variant ?? null) &&
+          (r.brand ?? null) === (brand ?? null),
       )
     )
       throw appError("CONFLICT", `${item.name}${variant ? ` (${variant})` : ""} is already on this list.`);
     await ctx.db.patch(row._id, {
       variant,
+      brand,
+      split,
       quantity,
       packLabel,
       packCount,
@@ -330,7 +357,12 @@ export const tick = memberMutation({
     const row = await loadRow(ctx, member, args.rowId);
     const item = await loadItem(ctx, member, row.itemId);
     if (item.archived) throw appError("INVALID_INPUT", `"${item.name}" is archived.`);
-    const { variant, quantity, packLabel, packCount } = checkQuantity(item, args, row.variant);
+    const { variant, brand, split, quantity, packLabel, packCount } = checkQuantity(
+      item,
+      args,
+      await splitPropertiesFor(ctx, row.organizationId, row.scopeKey),
+      { variant: row.variant, brand: row.brand },
+    );
     if (!Number.isSafeInteger(args.totalPaise) || args.totalPaise <= 0 || args.totalPaise > MAX_LINE_PAISE)
       throw appError("INVALID_INPUT", `Enter the amount paid for ${item.name}.`);
     const shopId = (await checkShop(ctx, member, args.shopId))!;
@@ -340,6 +372,8 @@ export const tick = memberMutation({
         packLabel,
         packCount,
         variant,
+        brand,
+        split,
         shopId,
         totalPaise: args.totalPaise,
         unitPricePaise: unitPricePaise(args.totalPaise, quantity),
@@ -391,6 +425,8 @@ export const savePurchases = memberMutation({
           lines: chunk.map((r) => ({
             itemId: r.itemId,
             variant: r.bought!.variant,
+            brand: r.bought!.brand,
+            split: r.bought!.split,
             ...(r.bought!.packLabel !== undefined
               ? { packLabel: r.bought!.packLabel, packCount: r.bought!.packCount }
               : { quantity: r.bought!.quantity }),

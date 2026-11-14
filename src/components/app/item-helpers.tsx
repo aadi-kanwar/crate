@@ -8,7 +8,9 @@ import { Field } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { todayIn } from "@/lib/format";
+import type { BaseUnit, PacketSize } from "@convex/lib/validators";
+import { formatUnitPrice, parseDecimal, todayIn } from "@/lib/format";
+import { PACKET_SIZE_UNIT_LABEL, UNIT_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 type Existing = { id: string; name: string; aliases: readonly string[]; hint?: string; archived?: boolean };
@@ -64,20 +66,81 @@ export function SimilarItems({
 
 export type EarlierPrice = { unitPricePaise: number; shopId?: string; date?: string };
 
+/** Packet units that make sense for an item counted in `baseUnit`, with how many base units one of them is. */
+const PACKET_UNITS_FOR: Partial<Record<BaseUnit, { unit: PacketSize["unit"]; perBase: number }[]>> = {
+  kg: [
+    { unit: "g", perBase: 1000 },
+    { unit: "kg", perBase: 1 },
+  ],
+  litre: [
+    { unit: "ml", perBase: 1000 },
+    { unit: "litre", perBase: 1 },
+  ],
+  piece: [{ unit: "piece", perBase: 1 }],
+};
+
+/** For items counted in packets: what one packet holds (e.g. 200 g). */
+export function usePacketSize(initial?: PacketSize | null) {
+  const [amountText, setAmountText] = useState(initial ? String(initial.amount) : "");
+  const [unit, setUnit] = useState<PacketSize["unit"]>(initial?.unit ?? "g");
+  const amount = parseDecimal(amountText);
+  /** undefined: not given; null: typed but not a number above zero. */
+  const value: PacketSize | undefined | null = !amountText.trim() ? undefined : amount === null || amount <= 0 ? null : { amount, unit };
+  const reset = (next?: PacketSize | null) => {
+    setAmountText(next ? String(next.amount) : "");
+    setUnit(next?.unit ?? "g");
+  };
+  const fields = (id: string) => (
+    <div className="grid grid-cols-2 gap-3">
+      <Field id={`${id}-amount`} label="One packet holds" hint="e.g. 200 g, 1 litre, 10 pieces">
+        {(p) => <Input {...p} inputMode="decimal" className="tabular" value={amountText} onChange={(e) => setAmountText(e.target.value)} />}
+      </Field>
+      <Field id={`${id}-unit`} label="Unit">
+        {(p) => (
+          <NativeSelect {...p} value={unit} onChange={(e) => setUnit(e.target.value as PacketSize["unit"])}>
+            {(Object.keys(PACKET_SIZE_UNIT_LABEL) as PacketSize["unit"][]).map((u) => (
+              <option key={u} value={u}>
+                {PACKET_SIZE_UNIT_LABEL[u]}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
+      </Field>
+    </div>
+  );
+  return { value, fields, reset };
+}
+
 /**
  * Optional "earlier price" for a new item: the price per unit paid before
  * Crate, with when and where if known. Folded away until asked for.
  */
 export function useEarlierPrice(
-  unitName: string,
+  baseUnit: BaseUnit,
   shops: readonly { shopId: string; name: string }[],
   initial?: EarlierPrice | null,
 ) {
+  const unitName = UNIT_LABEL[baseUnit].one;
+  const packetUnits = PACKET_UNITS_FOR[baseUnit] ?? [];
   const [open, setOpen] = useState(initial != null);
   const [priceText, setPriceText] = useState(initial ? String(initial.unitPricePaise / 100) : "");
   const [date, setDate] = useState(initial?.date ?? "");
   const [shopId, setShopId] = useState(initial?.shopId ?? "");
-  const paise = priceText.trim() ? rupeesToPaise(priceText) : undefined;
+  // Or: the price of a packet of some size (turned into a price per unit).
+  const [byPacket, setByPacket] = useState(false);
+  const [packetAmountText, setPacketAmountText] = useState("");
+  const [packetUnit, setPacketUnit] = useState<string>("");
+  const chosenPacketUnit = packetUnits.find((u) => u.unit === packetUnit) ?? packetUnits[0];
+  const packetAmount = parseDecimal(packetAmountText);
+  const typed = priceText.trim() ? rupeesToPaise(priceText) : undefined;
+  const paise =
+    byPacket && packetUnits.length > 0
+      ? typed === undefined
+        ? undefined
+        : typed === null || !packetAmount || packetAmount <= 0
+          ? null
+          : Math.round((typed * chosenPacketUnit.perBase) / packetAmount)
+      : typed;
   /** undefined: none given; null: typed but not a valid amount. */
   const value: EarlierPrice | undefined | null =
     !open || paise === undefined ? undefined : paise === null || paise <= 0 ? null : { unitPricePaise: paise, shopId: shopId || undefined, date: date || undefined };
@@ -90,9 +153,53 @@ export function useEarlierPrice(
       </label>
       {open ? (
         <div className={cn("flex flex-col gap-3 rounded-md border border-border bg-subtle/40 p-3")}>
-          <Field id={`${id}-price`} label={`Price per ${unitName} (₹)`} hint="Used for estimates and the price check until it's bought through Crate.">
-            {(p) => <Input {...p} inputMode="decimal" className="tabular" value={priceText} onChange={(e) => setPriceText(e.target.value)} />}
-          </Field>
+          {packetUnits.length > 0 ? (
+            <div role="radiogroup" aria-label="Price given" className="flex flex-wrap gap-2">
+              {[false, true].map((mode) => (
+                <button
+                  key={String(mode)}
+                  type="button"
+                  role="radio"
+                  aria-checked={byPacket === mode}
+                  onClick={() => setByPacket(mode)}
+                  className={cn(
+                    "min-h-10 rounded-full border px-4 text-sm font-medium",
+                    byPacket === mode ? "border-primary bg-primary text-primary-foreground" : "border-border-strong bg-surface hover:bg-subtle",
+                  )}
+                >
+                  {mode ? "For a packet" : `Per ${unitName}`}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {byPacket && packetUnits.length > 0 ? (
+            <div className="grid grid-cols-3 gap-3">
+              <Field id={`${id}-packet-amount`} label="Packet of">
+                {(p) => <Input {...p} inputMode="decimal" className="tabular" value={packetAmountText} onChange={(e) => setPacketAmountText(e.target.value)} />}
+              </Field>
+              <Field id={`${id}-packet-unit`} label="Unit">
+                {(p) => (
+                  <NativeSelect {...p} value={chosenPacketUnit.unit} onChange={(e) => setPacketUnit(e.target.value)}>
+                    {packetUnits.map((u) => (
+                      <option key={u.unit} value={u.unit}>
+                        {PACKET_SIZE_UNIT_LABEL[u.unit]}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                )}
+              </Field>
+              <Field id={`${id}-price`} label="Packet price (₹)">
+                {(p) => <Input {...p} inputMode="decimal" className="tabular" value={priceText} onChange={(e) => setPriceText(e.target.value)} />}
+              </Field>
+            </div>
+          ) : (
+            <Field id={`${id}-price`} label={`Price per ${unitName} (₹)`} hint="Used for estimates and the price check until it's bought through Crate.">
+              {(p) => <Input {...p} inputMode="decimal" className="tabular" value={priceText} onChange={(e) => setPriceText(e.target.value)} />}
+            </Field>
+          )}
+          {byPacket && typeof paise === "number" ? (
+            <p className="tabular text-sm text-foreground-secondary">= {formatUnitPrice(paise, baseUnit)}</p>
+          ) : null}
           <div className="grid grid-cols-2 gap-3">
             <Field id={`${id}-date`} label="When (optional)">
               {(p) => <Input {...p} type="date" max={todayIn()} value={date} onChange={(e) => setDate(e.target.value)} />}
@@ -120,6 +227,8 @@ export function useEarlierPrice(
     setPriceText(next ? String(next.unitPricePaise / 100) : "");
     setDate(next?.date ?? "");
     setShopId(next?.shopId ?? "");
+    setByPacket(false);
+    setPacketAmountText("");
   };
   return { value, fields, reset };
 }

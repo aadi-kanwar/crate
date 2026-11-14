@@ -29,9 +29,11 @@ import { isIsoDate } from "./lib/history";
 import {
   vBaseUnit,
   vPackSize,
+  vPacketSize,
   vReferencePrice,
   vShopType,
   type PackSize,
+  type PacketSize,
 } from "./lib/validators";
 
 type Db = Pick<QueryCtx, "db">;
@@ -150,6 +152,8 @@ const itemSnapshot = (item: Doc<"items">) => ({
   aliases: item.aliases,
   packSizes: item.packSizes,
   variants: item.variants,
+  brands: item.brands ?? [],
+  packetSize: item.packetSize ?? null,
   defaultShopId: item.defaultShopId ?? null,
   referencePrice: item.referencePrice ?? null,
   status: item.status,
@@ -194,6 +198,8 @@ export const forEntry = memberQuery({
           aliases: i.aliases,
           packSizes: i.packSizes,
           variants: i.variants,
+          brands: i.brands ?? [],
+          packetSize: i.packetSize ?? null,
           defaultShopId: i.defaultShopId ?? null,
           referencePrice: i.referencePrice ?? null,
           verified: i.status === "verified",
@@ -221,6 +227,7 @@ export const addItem = memberMutation({
     aliases: v.optional(v.array(v.string())),
     defaultShopId: v.optional(v.id("shops")),
     referencePrice: v.optional(vReferencePrice),
+    packetSize: v.optional(vPacketSize),
   },
   handler: async (ctx, args) => {
     const organizationId = ctx.member.organization._id;
@@ -238,6 +245,8 @@ export const addItem = memberMutation({
       aliases: cleanList(args.aliases ?? [], "other name", name),
       packSizes: [],
       variants: [],
+      brands: [],
+      packetSize: checkPacketSize(args.baseUnit, args.packetSize),
       defaultShopId,
       referencePrice,
       status: ctx.member.isAdmin ? "verified" : "unverified",
@@ -346,6 +355,8 @@ export const lists = adminQuery({
           aliases: i.aliases,
           packSizes: i.packSizes,
           variants: i.variants,
+          brands: i.brands ?? [],
+          packetSize: i.packetSize ?? null,
           defaultShopId: i.defaultShopId ?? null,
           defaultShopName: i.defaultShopId ? (shopName.get(i.defaultShopId) ?? null) : null,
           referencePrice: i.referencePrice ?? null,
@@ -520,6 +531,10 @@ const vItemFields = {
   aliases: v.array(v.string()),
   packSizes: v.array(vPackSize),
   variants: v.array(v.string()),
+  /** Preferred brands; leave out to keep none. */
+  brands: v.optional(v.array(v.string())),
+  /** Items counted in packets: what one packet holds. */
+  packetSize: v.optional(vPacketSize),
   /** The shop it is usually bought from; leave out for none. */
   defaultShopId: v.optional(v.id("shops")),
   /** A price known from before Crate; leave out for none. */
@@ -541,6 +556,14 @@ async function checkReferencePrice(
   return { unitPricePaise: price.unitPricePaise, shopId: price.shopId, date: price.date };
 }
 
+/** A packet's size, only for items counted in packets, above zero. */
+function checkPacketSize(baseUnit: string, size: PacketSize | undefined): PacketSize | undefined {
+  if (baseUnit !== "packet" || size === undefined) return undefined;
+  if (!Number.isFinite(size.amount) || size.amount <= 0 || size.amount > MAX_QUANTITY)
+    throw appError("INVALID_INPUT", "Enter what one packet holds, above zero.");
+  return { amount: tidyQuantity(size.amount), unit: size.unit };
+}
+
 /** A default shop of this organisation that isn't archived (or none). */
 async function checkDefaultShop(ctx: Db, organizationId: Id<"organizations">, shopId: Id<"shops"> | undefined, current?: Id<"shops">) {
   if (shopId === undefined) return undefined;
@@ -558,6 +581,9 @@ async function cleanItemFields(
     aliases: string[];
     packSizes: PackSize[];
     variants: string[];
+    brands?: string[];
+    baseUnit: string;
+    packetSize?: PacketSize;
     defaultShopId?: Id<"shops">;
     referencePrice?: { unitPricePaise: number; shopId?: Id<"shops">; date?: string };
   },
@@ -571,6 +597,8 @@ async function cleanItemFields(
     aliases: cleanList(args.aliases, "other name", name),
     packSizes: cleanPacks(args.packSizes),
     variants: cleanList(args.variants, "variant"),
+    brands: cleanList(args.brands ?? [], "brand"),
+    packetSize: checkPacketSize(args.baseUnit, args.packetSize),
     defaultShopId: await checkDefaultShop(ctx, organizationId, args.defaultShopId, currentShop),
     referencePrice: await checkReferencePrice(ctx, organizationId, args.referencePrice),
   };
@@ -627,7 +655,15 @@ export const updateItem = adminMutation({
         "This item has already been bought, so its unit can't change. Add a new item instead.",
       );
     const status = args.verify ? "verified" : item.status;
-    await ctx.db.patch(item._id, { ...fields, baseUnit: args.baseUnit, archived: args.archived, status });
+    await ctx.db.patch(item._id, {
+      ...fields,
+      // Left out by older screens: keep what's there.
+      brands: args.brands === undefined ? item.brands : fields.brands,
+      packetSize: args.packetSize === undefined && args.baseUnit === item.baseUnit ? item.packetSize : fields.packetSize,
+      baseUnit: args.baseUnit,
+      archived: args.archived,
+      status,
+    });
     if (fields.categoryId !== item.categoryId)
       for (const line of lines) await ctx.db.patch(line._id, { categoryId: fields.categoryId });
     const after = itemSnapshot((await ctx.db.get(item._id))!);
@@ -638,6 +674,40 @@ export const updateItem = adminMutation({
       entityType: "items",
       entityId: item._id,
       metadata: { before: itemSnapshot(item), after },
+    });
+    return null;
+  },
+});
+
+/**
+ * Deletes an item from the master list, only if it has never been bought
+ * (any entry, even a deleted one, keeps it: archive those instead so the
+ * history stays). It also leaves every shopping list.
+ */
+export const deleteItem = adminMutation({
+  args: { itemId: v.id("items") },
+  handler: async (ctx, args) => {
+    const organizationId = ctx.admin.organization._id;
+    const item = await loadItem(ctx, organizationId, args.itemId);
+    const bought = await ctx.db
+      .query("entryLines")
+      .withIndex("by_item_loggedAt", (q) => q.eq("itemId", item._id))
+      .first();
+    if (bought !== null)
+      throw appError("CONFLICT", `"${item.name}" has been bought before, so it can't be deleted. Archive it instead: it disappears from entering but keeps its history.`);
+    const listRows = await ctx.db
+      .query("shoppingListItems")
+      .withIndex("by_item", (q) => q.eq("itemId", item._id))
+      .collect();
+    for (const row of listRows) await ctx.db.delete(row._id);
+    await ctx.db.delete(item._id);
+    await writeAudit(ctx, {
+      organizationId,
+      actorUserId: ctx.admin.userId,
+      action: "item.deleted",
+      entityType: "items",
+      entityId: item._id,
+      metadata: { before: itemSnapshot(item), removedFromLists: listRows.length },
     });
     return null;
   },
@@ -676,6 +746,7 @@ export const mergeItem = adminMutation({
     await ctx.db.patch(keep._id, {
       aliases: cleanList([...keep.aliases, duplicate.name, ...duplicate.aliases], "other name", keep.name),
       variants: cleanList([...keep.variants, ...duplicate.variants], "variant"),
+      brands: cleanList([...(keep.brands ?? []), ...(duplicate.brands ?? [])], "brand"),
       packSizes: [...keep.packSizes, ...duplicate.packSizes.filter((p) => !packLabels.has(searchKey(p.label)))],
       defaultShopId: keep.defaultShopId ?? duplicate.defaultShopId,
       referencePrice: keep.referencePrice ?? duplicate.referencePrice,

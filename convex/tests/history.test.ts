@@ -161,9 +161,9 @@ describe("entries log, item page and CSV", () => {
     expect(rows).toBe(2);
     const lines = csv.trim().split("\r\n");
     expect(lines[0]).toContain("Price per unit (Rs)");
-    expect(lines.slice(1).map((l) => l.split(",").slice(2, 9))).toEqual([
-      ["Main PG", "Sharma Kirana", "Kirana", "Grocery", "Tomato", "", "3"],
-      ["Main PG", "Sharma Kirana", "Kirana", "Grocery", "Milk", "Toned", "2"],
+    expect(lines.slice(1).map((l) => l.split(",").slice(2, 10))).toEqual([
+      ["Main PG", "Sharma Kirana", "Kirana", "Grocery", "Tomato", "", "", "3"],
+      ["Main PG", "Sharma Kirana", "Kirana", "Grocery", "Milk", "Toned", "", "2"],
     ]);
     expect(lines[1]).toContain(",120.00,40.00,");
     const audit = await c.t.run((ctx) => ctx.db.query("auditLog").collect());

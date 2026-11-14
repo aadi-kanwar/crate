@@ -31,7 +31,11 @@ export const UNIT_LABEL: Record<BaseUnit, { one: string; many: string }> = {
   piece: { one: "piece", many: "pieces" },
   dozen: { one: "dozen", many: "dozen" },
   cylinder: { one: "cylinder", many: "cylinders" },
+  packet: { one: "packet", many: "packets" },
 };
+
+/** What one packet holds (packet items). */
+export const PACKET_SIZE_UNIT_LABEL = { g: "g", kg: "kg", ml: "ml", litre: "litre", piece: "pieces" } as const;
 
 export const SHOP_TYPE_LABEL: Record<ShopType, string> = {
   wholesaler: "Wholesaler",

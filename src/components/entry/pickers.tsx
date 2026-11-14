@@ -9,7 +9,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { matchesSearch } from "@convex/lib/purchases";
 import { BASE_UNITS, SHOP_TYPES, type BaseUnit, type ShopType } from "@convex/lib/validators";
 import { CategorySelect } from "@/components/app/category-select";
-import { SimilarItems, useEarlierPrice } from "@/components/app/item-helpers";
+import { SimilarItems, useEarlierPrice, usePacketSize } from "@/components/app/item-helpers";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
@@ -157,7 +157,8 @@ function NewItemForm({
   const [alias, setAlias] = useState("");
   const [defaultShopId, setDefaultShopId] = useState("");
   const [busy, setBusy] = useState(false);
-  const earlier = useEarlierPrice(UNIT_LABEL[baseUnit].one, catalog.shops);
+  const earlier = useEarlierPrice(baseUnit, catalog.shops);
+  const packet = usePacketSize();
   const categoryLabel = new Map<string, string>(catalog.categories.map((c) => [c.categoryId, c.label]));
   return (
     <form
@@ -166,6 +167,7 @@ function NewItemForm({
         e.preventDefault();
         if (!categoryId) return;
         if (earlier.value === null) return toast.error("Enter the earlier price in rupees, or untick it.");
+        if (baseUnit === "packet" && packet.value === null) return toast.error("Enter what one packet holds, as a number.");
         setBusy(true);
         try {
           const aliases = alias.trim() ? [alias.trim()] : [];
@@ -173,7 +175,8 @@ function NewItemForm({
           const referencePrice = earlier.value
             ? { unitPricePaise: earlier.value.unitPricePaise, shopId: earlier.value.shopId as Id<"shops"> | undefined, date: earlier.value.date }
             : undefined;
-          const itemId = await addItem({ name, categoryId, baseUnit, aliases, defaultShopId: shop, referencePrice });
+          const packetSize = baseUnit === "packet" ? (packet.value ?? undefined) : undefined;
+          const itemId = await addItem({ name, categoryId, baseUnit, aliases, defaultShopId: shop, referencePrice, packetSize });
           onCreated({
             itemId,
             name: name.trim(),
@@ -182,6 +185,8 @@ function NewItemForm({
             aliases,
             packSizes: [],
             variants: [],
+            brands: [],
+            packetSize: packetSize ?? null,
             defaultShopId: shop ?? null,
             referencePrice: referencePrice ?? null,
             verified: false,
@@ -224,6 +229,7 @@ function NewItemForm({
           </NativeSelect>
         )}
       </Field>
+      {baseUnit === "packet" ? packet.fields("new-item-packet") : null}
       <Field id="new-item-shop" label="Usually bought from (optional)">
         {(p) => (
           <NativeSelect {...p} value={defaultShopId} onChange={(e) => setDefaultShopId(e.target.value)}>

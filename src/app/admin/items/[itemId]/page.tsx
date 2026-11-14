@@ -272,7 +272,7 @@ function Prices({ page }: { page: Page }) {
                 key: `${p.entryId}-${i}`,
                 time: p.loggedAt,
                 value: p.unitPricePaise / 100,
-                tip: [formatUnitPrice(p.unitPricePaise, unit), `${formatWhen(p.loggedAt)} · ${p.shopName}${p.variant ? ` · ${p.variant}` : ""}`],
+                tip: [formatUnitPrice(p.unitPricePaise, unit), `${formatWhen(p.loggedAt)} · ${p.shopName}${p.variant ? ` · ${p.variant}` : ""}${p.brand ? ` · ${p.brand}` : ""}`],
               }))}
             />
           )}
@@ -299,7 +299,9 @@ function Prices({ page }: { page: Page }) {
                 </TD>
                 <TD>
                   {p.shopName}
-                  {p.variant ? <span className="block text-xs text-foreground-secondary">{p.variant}</span> : null}
+                  {p.variant || p.brand ? (
+                    <span className="block text-xs text-foreground-secondary">{[p.variant, p.brand].filter(Boolean).join(" · ")}</span>
+                  ) : null}
                 </TD>
                 <TD className="hidden sm:table-cell">{p.scopeName}</TD>
                 <TD className="tabular text-right">

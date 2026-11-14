@@ -29,6 +29,7 @@ const ACTION_LABEL: Record<string, string> = {
   "item.updated": "Item changed",
   "item.verified": "Item verified",
   "item.merged": "Items merged",
+  "item.deleted": "Item deleted",
   "shop.created": "Shop added",
   "shop.updated": "Shop changed",
   "shop.verified": "Shop verified",
