@@ -181,3 +181,52 @@ export function similarItems<T extends { name: string; aliases: readonly string[
     .slice(0, limit)
     .map((s) => s.item);
 }
+
+
+/** Always offered for variants and brands, whatever the item lists. */
+export const LOOSE = "Loose";
+
+/** A variant / brand choice is fine if empty (None), "Loose", or one the item lists. */
+export function isAllowedChoice(value: string | undefined, listed: readonly string[], keep?: string): boolean {
+  return value === undefined || value === LOOSE || listed.includes(value) || value === keep;
+}
+
+/** Item variants or brands as chips: None (""), Loose, then the item's own (without a second Loose). */
+export function choiceOptions(listed: readonly string[]): string[] {
+  return ["", LOOSE, ...listed.filter((v) => searchKey(v) !== searchKey(LOOSE))];
+}
+
+/** A plain-language problem with a split, or null when every part is positive and they add up. */
+export function splitProblem(
+  split: readonly { propertyId: string; quantity: number }[],
+  quantity: number,
+): string | null {
+  if (split.length === 0) return null;
+  const ids = new Set(split.map((s) => s.propertyId));
+  if (ids.size !== split.length) return "Each property can appear only once in a split.";
+  if (split.some((s) => !Number.isFinite(s.quantity) || s.quantity < 0)) return "Split quantities can't be negative.";
+  const sum = tidyQuantity(split.reduce((t, s) => t + s.quantity, 0));
+  if (Math.abs(sum - quantity) > 0.000_5) return `The split adds up to ${sum}, but the quantity is ${tidyQuantity(quantity)}.`;
+  return null;
+}
+
+/**
+ * What each property's share of a line is: quantity and amount (paise,
+ * rounded, the last share taking the remainder so they add up exactly).
+ * A line with no split is one share for its own scope.
+ */
+export function lineShares(line: {
+  scopeKey: string;
+  quantity: number;
+  totalPaise: number;
+  split?: readonly { propertyId: string; quantity: number }[];
+}): { scopeKey: string; quantity: number; totalPaise: number }[] {
+  const parts = (line.split ?? []).filter((s) => s.quantity > 0);
+  if (parts.length === 0 || line.quantity <= 0) return [{ scopeKey: line.scopeKey, quantity: line.quantity, totalPaise: line.totalPaise }];
+  let left = line.totalPaise;
+  return parts.map((s, i) => {
+    const paise = i === parts.length - 1 ? left : Math.round((line.totalPaise * s.quantity) / line.quantity);
+    left -= paise;
+    return { scopeKey: s.propertyId, quantity: s.quantity, totalPaise: paise };
+  });
+}

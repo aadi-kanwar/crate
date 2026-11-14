@@ -14,6 +14,7 @@ import { entrySummary } from "./entries";
 import { writeAudit } from "./lib/audit";
 import { toCsv } from "./lib/csv";
 import { categoryLabels, withSubcategories } from "./lib/categories";
+import { lineShares } from "./lib/purchases";
 import { appError } from "./lib/errors";
 import { adminMutation, adminQuery, type AdminViewer } from "./lib/functions";
 import {
@@ -58,6 +59,25 @@ function checkRange(fromDate: string, toDate: string) {
   if (istStart(toDate) - istStart(fromDate) > MAX_RANGE_DAYS * 86_400_000)
     throw appError("INVALID_DATE", `Choose at most ${MAX_RANGE_DAYS} days.`);
   return { from: istStart(fromDate), to: istStart(addDays(toDate, 1)) };
+}
+
+/**
+ * How much of a line counts for a scope. "all": the whole line. A
+ * property: its own lines, plus its share of Shared lines split between
+ * properties. "shared": Shared lines that weren't split (split ones count
+ * for the properties instead). Null when the line doesn't count there.
+ */
+export function shareFor(
+  line: Pick<Doc<"entryLines">, "scopeKey" | "quantity" | "totalPaise" | "split">,
+  scope: string,
+): { quantity: number; totalPaise: number } | null {
+  if (scope === "all") return { quantity: line.quantity, totalPaise: line.totalPaise };
+  const isSplit = line.scopeKey === "shared" && (line.split?.length ?? 0) > 0;
+  if (scope === "shared") return line.scopeKey === "shared" && !isSplit ? { quantity: line.quantity, totalPaise: line.totalPaise } : null;
+  if (line.scopeKey === scope) return { quantity: line.quantity, totalPaise: line.totalPaise };
+  if (!isSplit) return null;
+  const share = lineShares(line).find((x) => x.scopeKey === scope);
+  return share ? { quantity: share.quantity, totalPaise: share.totalPaise } : null;
 }
 
 /** Live (not deleted) lines matching the filters, oldest first, with their entries. */
@@ -107,21 +127,36 @@ async function filteredLines(ctx: Db, admin: AdminViewer, filters: Filters) {
         q.eq("organizationId", organizationId).eq("scopeKey", scope).gte("loggedAt", from).lt("loggedAt", to),
       )
       .collect();
+    // A property also gets its share of Shared lines split between properties.
+    if (scope !== "shared")
+      rows.push(
+        ...(await ctx.db
+          .query("entryLines")
+          .withIndex("by_scope_loggedAt", (q) =>
+            q.eq("organizationId", organizationId).eq("scopeKey", "shared").gte("loggedAt", from).lt("loggedAt", to),
+          )
+          .collect()),
+      );
   } else {
     rows = await ctx.db
       .query("entryLines")
       .withIndex("by_org_loggedAt", (q) => q.eq("organizationId", organizationId).gte("loggedAt", from).lt("loggedAt", to))
       .collect();
   }
-  const lines = rows.filter(
-    (l) =>
-      !l.deleted &&
-      l.organizationId === organizationId &&
-      (scope === "all" || l.scopeKey === scope) &&
-      (!filters.itemId || l.itemId === filters.itemId) &&
-      (!filters.shopId || l.shopId === filters.shopId) &&
-      (!categoryIds || categoryIds.includes(l.categoryId)),
-  );
+  const lines = rows
+    .filter(
+      (l) =>
+        !l.deleted &&
+        l.organizationId === organizationId &&
+        (!filters.itemId || l.itemId === filters.itemId) &&
+        (!filters.shopId || l.shopId === filters.shopId) &&
+        (!categoryIds || categoryIds.includes(l.categoryId)),
+    )
+    // Each line as much of it as counts for the scope (a property's share of a split Shared line).
+    .flatMap((l) => {
+      const share = shareFor(l, scope);
+      return share ? [{ ...l, quantity: share.quantity, totalPaise: share.totalPaise, isShare: share.totalPaise !== l.totalPaise || share.quantity !== l.quantity }] : [];
+    });
   const entries = new Map<string, Doc<"entries">>();
   for (const line of lines) {
     if (!entries.has(line.entryId)) {
@@ -190,7 +225,7 @@ const SHOP_TYPE_NAMES: Record<string, string> = {
   lpg_agency: "LPG agency",
   other: "Other",
 };
-const UNIT_NAMES: Record<string, string> = { kg: "kg", litre: "litre", piece: "piece", dozen: "dozen", cylinder: "cylinder" };
+const UNIT_NAMES: Record<string, string> = { kg: "kg", litre: "litre", piece: "piece", dozen: "dozen", cylinder: "cylinder", packet: "packet" };
 
 /** Spreadsheet (CSV) of the filtered log: one row per line item. Recorded in the audit log. */
 export const exportCsv = adminMutation({
@@ -210,7 +245,7 @@ export const exportCsv = adminMutation({
         .collect(),
     );
     const rows: (string | number)[][] = [
-      ["Date", "Time", "For", "Shop", "Shop type", "Category", "Item", "Variant", "Quantity", "Unit", "Pack", "Pack count", "Total (Rs)", "Price per unit (Rs)", "Entered by", "Note", "Entry"],
+      ["Date", "Time", "For", "Shop", "Shop type", "Category", "Item", "Variant", "Brand", "Quantity", "Unit", "Pack", "Pack count", "Total (Rs)", "Price per unit (Rs)", "Split between properties", "Entered by", "Note", "Entry"],
     ];
     const ordered = [...lines].sort(
       (a, b) => b.loggedAt - a.loggedAt || a.entryId.localeCompare(b.entryId) || a._creationTime - b._creationTime,
@@ -229,12 +264,14 @@ export const exportCsv = adminMutation({
         categoryNames.get(line.categoryId) ?? "",
         item?.name ?? "",
         line.variant ?? "",
+        line.brand ?? "",
         line.quantity,
         item ? UNIT_NAMES[item.baseUnit] : "",
         line.packLabel ?? "",
         line.packCount ?? "",
         (line.totalPaise / 100).toFixed(2),
         (line.unitPricePaise / 100).toFixed(2),
+        (line.split ?? []).map((part) => `${properties.get(part.propertyId) ?? ""} ${part.quantity}`).join("; "),
         user?.name ?? "",
         entry.note ?? "",
         entry._id,
@@ -255,6 +292,14 @@ export const exportCsv = adminMutation({
     };
   },
 });
+
+/** Lines as much as counts for the scope (see shareFor). */
+function sharesOf(lines: readonly Doc<"entryLines">[], scope: string): Doc<"entryLines">[] {
+  return lines.flatMap((l) => {
+    const share = shareFor(l, scope);
+    return share ? [{ ...l, quantity: share.quantity, totalPaise: share.totalPaise }] : [];
+  });
+}
 
 async function itemLines(ctx: Db, itemId: Id<"items">) {
   return (
@@ -281,7 +326,7 @@ export const items = adminQuery({
       allItems
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(async (item) => {
-          const lines = (await itemLines(ctx, item._id)).filter((l) => scope === "all" || l.scopeKey === scope);
+          const lines = sharesOf(await itemLines(ctx, item._id), scope);
           const last = lines[lines.length - 1];
           const recent = lines.filter((l) => l.loggedAt >= since);
           return {
@@ -323,21 +368,28 @@ export const item = adminQuery({
         .withIndex("by_org_order", (q) => q.eq("organizationId", organizationId))
         .collect(),
     );
-    const all = (await itemLines(ctx, item._id)).filter((l) => scope === "all" || l.scopeKey === scope);
-    // Lines of deleted entries are already marked deleted; double-check the entry.
+    const raw = await itemLines(ctx, item._id);
+    const all = sharesOf(raw, scope);
     const inRange = all.filter((l) => l.loggedAt >= from && l.loggedAt < to);
     const shops = new Map<string, string>();
     for (const l of inRange) if (!shops.has(l.shopId)) shops.set(l.shopId, (await ctx.db.get(l.shopId))?.name ?? "");
     const scopeName = (key: string) =>
       key === "shared" ? "Shared" : (ctx.admin.properties.find((p) => p._id === key)?.name ?? "");
-    const upToEnd = all.filter((l) => l.loggedAt < to);
-    const scopeKeys = [...new Set(upToEnd.map((l) => l.scopeKey))];
-    const usage = scopeKeys
-      .map((key) => ({
+    // Usage per property (with its shares of split Shared purchases) and for unsplit Shared purchases.
+    const perScope = new Map<string, { loggedAt: number; quantity: number }[]>();
+    for (const line of raw) {
+      if (line.loggedAt >= to) continue;
+      for (const share of lineShares(line)) {
+        if (scope !== "all" && share.scopeKey !== scope) continue;
+        perScope.set(share.scopeKey, [...(perScope.get(share.scopeKey) ?? []), { loggedAt: line.loggedAt, quantity: share.quantity }]);
+      }
+    }
+    const usage = [...perScope.entries()]
+      .map(([key, purchases]) => ({
         scopeKey: key,
         scopeName: scopeName(key),
-        purchases: upToEnd.filter((l) => l.scopeKey === key).length,
-        rate: usageRate(upToEnd.filter((l) => l.scopeKey === key)),
+        purchases: purchases.length,
+        rate: usageRate(purchases),
       }))
       .sort((a, b) => a.scopeName.localeCompare(b.scopeName));
     const range = { from: args.fromDate, to: args.toDate };
@@ -370,6 +422,7 @@ export const item = adminQuery({
         totalPaise: l.totalPaise,
         unitPricePaise: l.unitPricePaise,
         variant: l.variant ?? null,
+        brand: l.brand ?? null,
         shopId: l.shopId,
         shopName: shops.get(l.shopId) ?? "",
         scopeName: scopeName(l.scopeKey),

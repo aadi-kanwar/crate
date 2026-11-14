@@ -2,7 +2,7 @@
 
 import { useMutation } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { Archive, BadgeCheck, CircleHelp, GitMerge, Pencil, Plus, X } from "lucide-react";
+import { Trash2, Archive, BadgeCheck, CircleHelp, GitMerge, Pencil, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -10,7 +10,7 @@ import { matchesSearch } from "@convex/lib/purchases";
 import { BASE_UNITS, SHOP_TYPES, type BaseUnit, type ShopType } from "@convex/lib/validators";
 import { CategorySelect } from "@/components/app/category-select";
 import { CategoryTree } from "./category-tree";
-import { SimilarItems, useEarlierPrice } from "@/components/app/item-helpers";
+import { SimilarItems, useEarlierPrice, usePacketSize } from "@/components/app/item-helpers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
@@ -27,7 +27,7 @@ import { toast } from "@/components/ui/toaster";
 import { useQuery } from "@/lib/convex";
 import { friendlyError } from "@/lib/errors";
 import { formatDateTime, formatUnitPrice, parseDecimal } from "@/lib/format";
-import { SHOP_TYPE_LABEL, UNIT_LABEL } from "@/lib/labels";
+import { PACKET_SIZE_UNIT_LABEL, SHOP_TYPE_LABEL, UNIT_LABEL } from "@/lib/labels";
 
 type Lists = FunctionReturnType<typeof api.catalog.lists>;
 type Item = Lists["items"][number];
@@ -167,6 +167,8 @@ function ItemRows({ items, lists, review = false }: { items: Item[]; lists: List
               <span className="text-sm text-foreground-secondary">
                 {item.categoryName} · per {UNIT_LABEL[item.baseUnit].one} · {item.lineCount} {item.lineCount === 1 ? "purchase" : "purchases"}
                 {item.aliases.length > 0 ? ` · also “${item.aliases.join("”, “")}”` : ""}
+                {item.packetSize ? ` · packet of ${item.packetSize.amount} ${PACKET_SIZE_UNIT_LABEL[item.packetSize.unit]}` : ""}
+                {item.brands.length > 0 ? ` · brands: ${item.brands.join(", ")}` : ""}
                 {item.defaultShopName ? ` · usually from ${item.defaultShopName}` : ""}
                 {item.referencePrice && item.lineCount === 0
                   ? ` · earlier price ${formatUnitPrice(item.referencePrice.unitPricePaise, item.baseUnit)}`
@@ -216,6 +218,8 @@ function VerifyItem({ item }: { item: Item }) {
             packSizes: item.packSizes,
             variants: item.variants,
             defaultShopId: item.defaultShopId ?? undefined,
+            brands: item.brands,
+            packetSize: item.packetSize ?? undefined,
             // Keep the earlier price as it is.
             referencePrice: item.referencePrice
               ? { unitPricePaise: item.referencePrice.unitPricePaise, shopId: item.referencePrice.shopId, date: item.referencePrice.date }
@@ -249,12 +253,16 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
   const [baseUnit, setBaseUnit] = useState<BaseUnit>("kg");
   const [aliases, setAliases] = useState("");
   const [variants, setVariants] = useState("");
+  const [brands, setBrands] = useState("");
   const [packs, setPacks] = useState<{ label: string; quantity: string }[]>([]);
   const [archived, setArchived] = useState(false);
   const [defaultShopId, setDefaultShopId] = useState("");
   const [busy, setBusy] = useState(false);
+  const packet = usePacketSize(item?.packetSize ?? null);
+  const remove = useMutation(api.catalog.deleteItem);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const earlier = useEarlierPrice(
-    UNIT_LABEL[baseUnit].one,
+    baseUnit,
     lists.shops.filter((sh) => !sh.archived),
     item?.referencePrice ?? null,
   );
@@ -266,6 +274,9 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
     setBaseUnit(item?.baseUnit ?? "kg");
     setAliases(item?.aliases.join(", ") ?? "");
     setVariants(item?.variants.join(", ") ?? "");
+    setBrands(item?.brands.join(", ") ?? "");
+    packet.reset(item?.packetSize ?? null);
+    setConfirmDelete(false);
     setPacks(item?.packSizes.map((p) => ({ label: p.label, quantity: String(p.quantity) })) ?? []);
     setArchived(item?.archived ?? false);
     setDefaultShopId(item?.defaultShopId ?? "");
@@ -311,6 +322,10 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
               toast.error("Enter the earlier price in rupees, or untick it.");
               return;
             }
+            if (baseUnit === "packet" && packet.value === null) {
+              toast.error("Enter what one packet holds, as a number.");
+              return;
+            }
             setBusy(true);
             try {
               const fields = {
@@ -319,6 +334,8 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
                 baseUnit,
                 aliases: splitList(aliases),
                 variants: splitList(variants),
+                brands: splitList(brands),
+                packetSize: baseUnit === "packet" ? (packet.value ?? undefined) : undefined,
                 packSizes,
                 defaultShopId: (defaultShopId || undefined) as Id<"shops"> | undefined,
                 referencePrice: earlier.value
@@ -386,8 +403,12 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
           <Field id="item-aliases" label="Other names" hint="Separate with commas, any language: tamatar, टमाटर">
             {(p) => <Input {...p} value={aliases} onChange={(e) => setAliases(e.target.value)} />}
           </Field>
-          <Field id="item-variants" label="Variants" hint="Optional, separated by commas: Aashirvaad, Loose, Toned">
+          {baseUnit === "packet" ? packet.fields("item-packet") : null}
+          <Field id="item-variants" label="Variants" hint="Optional, separated by commas: Toned, Full cream. None and Loose are always offered.">
             {(p) => <Input {...p} value={variants} onChange={(e) => setVariants(e.target.value)} />}
+          </Field>
+          <Field id="item-brands" label="Preferred brands" hint="Optional, separated by commas: Aashirvaad, Fortune. None and Loose are always offered.">
+            {(p) => <Input {...p} value={brands} onChange={(e) => setBrands(e.target.value)} />}
           </Field>
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-1.5 text-sm font-medium">Pack sizes</legend>
@@ -428,7 +449,44 @@ function ItemDialog({ lists, item }: { lists: Lists; item?: Item }) {
               Archived (hidden when entering; history kept)
             </label>
           ) : null}
+          {item && confirmDelete ? (
+            <div role="alert" className="flex flex-col gap-2 rounded-md border border-danger-border bg-danger-subtle p-3 text-sm text-danger-text">
+              {item.lineCount > 0 ? (
+                <p>
+                  {item.name} has been bought {item.lineCount} {item.lineCount === 1 ? "time" : "times"}, so it can&apos;t be deleted without losing that
+                  history. Tick <strong>Archived</strong> above instead: it disappears from entering and keeps its history.
+                </p>
+              ) : (
+                <>
+                  <p>Delete {item.name} for good? It also leaves every shopping list. This can&apos;t be undone.</p>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="self-start"
+                    onClick={async () => {
+                      try {
+                        await remove({ itemId: item.itemId });
+                        toast.success(`${item.name} deleted.`);
+                        setOpen(false);
+                      } catch (error) {
+                        toast.error(friendlyError(error));
+                      }
+                    }}
+                  >
+                    <Icon icon={Trash2} />
+                    Yes, delete it
+                  </Button>
+                </>
+              )}
+            </div>
+          ) : null}
           <DialogFooter>
+            {item ? (
+              <Button type="button" variant="ghost" className="sm:mr-auto" onClick={() => setConfirmDelete(!confirmDelete)}>
+                <Icon icon={Trash2} />
+                Delete
+              </Button>
+            ) : null}
             <DialogClose asChild>
               <Button variant="ghost">Cancel</Button>
             </DialogClose>

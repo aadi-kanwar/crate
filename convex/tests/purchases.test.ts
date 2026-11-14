@@ -6,6 +6,10 @@ import {
   median,
   rupeesToPaise,
   similarItems,
+  lineShares,
+  splitProblem,
+  choiceOptions,
+  isAllowedChoice,
   unitPricePaise,
   withinEditWindow,
 } from "../lib/purchases";
@@ -142,5 +146,26 @@ describe("similar item names", () => {
   test("ignores unrelated names and very short input", () => {
     expect(names("Onion")).toEqual([]);
     expect(names("a")).toEqual([]);
+  });
+});
+
+describe("splitting a Shared line between properties", () => {
+  test("parts must be positive, once per property, and add up", () => {
+    expect(splitProblem([{ propertyId: "a", quantity: 6 }, { propertyId: "b", quantity: 4 }], 10)).toBeNull();
+    expect(splitProblem([{ propertyId: "a", quantity: 6 }, { propertyId: "b", quantity: 3 }], 10)).toMatch(/adds up to 9/);
+    expect(splitProblem([{ propertyId: "a", quantity: 6 }, { propertyId: "a", quantity: 4 }], 10)).toMatch(/only once/);
+    expect(splitProblem([{ propertyId: "a", quantity: 0.1 }, { propertyId: "b", quantity: 0.2 }], 0.3)).toBeNull();
+  });
+  test("each property's share of the amount follows its quantity and adds up to the paisa", () => {
+    const shares = lineShares({ scopeKey: "shared", quantity: 3, totalPaise: 10_000, split: [{ propertyId: "a", quantity: 1 }, { propertyId: "b", quantity: 2 }] });
+    expect(shares).toEqual([{ scopeKey: "a", quantity: 1, totalPaise: 3_333 }, { scopeKey: "b", quantity: 2, totalPaise: 6_667 }]);
+    expect(lineShares({ scopeKey: "shared", quantity: 3, totalPaise: 10_000 })).toEqual([{ scopeKey: "shared", quantity: 3, totalPaise: 10_000 }]);
+  });
+  test("variants and brands always offer None and Loose", () => {
+    expect(choiceOptions(["Toned", "loose"])).toEqual(["", "Loose", "Toned"]);
+    expect(isAllowedChoice("Loose", [])).toBe(true);
+    expect(isAllowedChoice("Amul", ["Amul"])).toBe(true);
+    expect(isAllowedChoice("Other", ["Amul"])).toBe(false);
+    expect(isAllowedChoice(undefined, [])).toBe(true);
   });
 });

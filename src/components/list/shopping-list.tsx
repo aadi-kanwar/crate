@@ -6,9 +6,10 @@ import { Check, Circle, CircleCheck, Plus, Store, Trash2, TriangleAlert, Undo2 }
 import { useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { rupeesToPaise, tidyQuantity, type PriceCheck } from "@convex/lib/purchases";
+import { choiceOptions, rupeesToPaise, tidyQuantity, type PriceCheck } from "@convex/lib/purchases";
 import type { PackSize } from "@convex/lib/validators";
 import { Chips, type Scope } from "@/components/entry/entry-form";
+import { SplitEditor, splitDraftFrom, splitDraftProblem, splitParts, splitText, type SplitDraft } from "@/components/entry/split-editor";
 import { ItemPicker, type Catalog, type CatalogItem } from "@/components/entry/pickers";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -180,6 +181,12 @@ function Bills({ list, mode }: { list: List; mode: Mode }) {
   );
 }
 
+/** Property names by id (for showing splits). */
+function usePropertyNames(): Map<string, string> {
+  const targets = useQuery(api.entries.splitTargets, {});
+  return useMemo(() => new Map((targets ?? []).map((t) => [t.propertyId as string, t.name])), [targets]);
+}
+
 // ---------------------------------------------------------------------------
 // Grouping
 // ---------------------------------------------------------------------------
@@ -209,6 +216,7 @@ function ListMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog
   const [adding, setAdding] = useState<CatalogItem | null>(null);
   const [editing, setEditing] = useState<Row | null>(null);
   const groups = groupRows(list.rows, sort);
+  const propertyNames = usePropertyNames();
   return (
     <>
       <Button className="min-h-14 text-base" onClick={() => setPicking(true)}>
@@ -247,12 +255,17 @@ function ListMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog
                       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="font-medium">
                           {row.itemName}
-                          {row.variant ? <span className="font-normal text-foreground-secondary"> · {row.variant}</span> : null}
+                          {[row.variant, row.brand].filter(Boolean).length > 0 ? (
+                            <span className="font-normal text-foreground-secondary"> · {[row.variant, row.brand].filter(Boolean).join(" · ")}</span>
+                          ) : null}
                         </span>
                         <span className="tabular text-sm text-foreground-secondary">
                           {plannedText(row)}
                           {sort === "category" ? ` · ${row.shopName ?? NO_SHOP}` : ` · ${row.categoryLabel}`}
                         </span>
+                        {row.split.length > 0 ? (
+                          <span className="tabular text-sm text-foreground-secondary">Split: {splitText(row.split, row.baseUnit, propertyNames)}</span>
+                        ) : null}
                       </div>
                       <span className="tabular shrink-0 text-right text-sm">
                         {row.estimatePaise !== null ? `≈${formatPaise(row.estimatePaise)}` : <span className="text-foreground-muted">No price</span>}
@@ -282,7 +295,7 @@ function ListMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog
           key={`new-${adding.itemId}`}
           catalog={catalog}
           scope={scope}
-          item={{ itemId: adding.itemId, name: adding.name, baseUnit: adding.baseUnit, packSizes: adding.packSizes, variants: adding.variants }}
+          item={{ itemId: adding.itemId, name: adding.name, baseUnit: adding.baseUnit, packSizes: adding.packSizes, variants: adding.variants, brands: adding.brands }}
           initial={{ shopId: adding.defaultShopId }}
           onClose={() => setAdding(null)}
         />
@@ -292,7 +305,7 @@ function ListMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog
           key={editing.rowId}
           catalog={catalog}
           scope={scope}
-          item={{ itemId: editing.itemId, name: editing.itemName, baseUnit: editing.baseUnit, packSizes: editing.packSizes, variants: editing.variants }}
+          item={{ itemId: editing.itemId, name: editing.itemName, baseUnit: editing.baseUnit, packSizes: editing.packSizes, variants: editing.variants, brands: editing.brands }}
           row={editing}
           onClose={() => setEditing(null)}
         />
@@ -301,12 +314,28 @@ function ListMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog
   );
 }
 
-type ItemInfo = { itemId: Id<"items">; name: string; baseUnit: Row["baseUnit"]; packSizes: PackSize[]; variants: string[] };
+type ItemInfo = { itemId: Id<"items">; name: string; baseUnit: Row["baseUnit"]; packSizes: PackSize[]; variants: string[]; brands: string[] };
+type SplitTarget = { propertyId: Id<"properties">; name: string };
 
 /** How much (directly or in packs) and which variant: shared by planning and ticking off. */
-function useAmount(item: ItemInfo, initial: { variant?: string | null; quantity?: number; packLabel?: string | null; packCount?: number | null }) {
+function useAmount(
+  item: ItemInfo,
+  initial: {
+    variant?: string | null;
+    brand?: string | null;
+    quantity?: number;
+    packLabel?: string | null;
+    packCount?: number | null;
+    split?: readonly { propertyId: Id<"properties">; quantity: number }[];
+  },
+  /** Shared list: every property, so the item can be split. Null otherwise. */
+  splitTargets: readonly SplitTarget[] | null,
+) {
   const variants = initial.variant && !item.variants.includes(initial.variant) ? [...item.variants, initial.variant] : item.variants;
+  const brands = initial.brand && !item.brands.includes(initial.brand) ? [...item.brands, initial.brand] : item.brands;
   const [variant, setVariant] = useState(initial.variant ?? "");
+  const [brand, setBrand] = useState(initial.brand ?? "");
+  const [split, setSplit] = useState<SplitDraft>(() => splitDraftFrom(initial.split));
   const [mode, setMode] = useState<"quantity" | "pack">(initial.packLabel ? "pack" : item.packSizes.length > 0 && initial.quantity === undefined ? "pack" : "quantity");
   const [packLabel, setPackLabel] = useState(initial.packLabel ?? item.packSizes[0]?.label ?? "");
   const [packCountText, setPackCountText] = useState(initial.packCount != null ? String(initial.packCount) : "");
@@ -316,14 +345,22 @@ function useAmount(item: ItemInfo, initial: { variant?: string | null; quantity?
   const direct = parseDecimal(quantityText);
   const quantity =
     mode === "pack" ? (pack && count !== null && count > 0 ? tidyQuantity(count * pack.quantity) : null) : direct !== null && direct > 0 ? tidyQuantity(direct) : null;
-  const payload =
-    mode === "pack"
-      ? { variant: variant || undefined, packLabel, packCount: count ?? 0 }
-      : { variant: variant || undefined, quantity: quantity ?? 0 };
+  const choice = {
+    variant: variant || undefined,
+    brand: brand || undefined,
+    split: splitTargets && split.on ? splitParts(split) : undefined,
+  };
+  const payload = mode === "pack" ? { ...choice, packLabel, packCount: count ?? 0 } : { ...choice, quantity: quantity ?? 0 };
+  /** Why it can't be saved yet (only the split can be wrong here), or null. */
+  const problem = splitTargets ? splitDraftProblem(split, quantity) : null;
   const fields = (id: string, autoFocus = false) => (
     <>
-      {variants.length > 0 ? (
-        <Chips label="Variant" options={["", ...variants]} value={variant} render={(v) => v || "Any"} onChange={setVariant} />
+      {/* None and Loose are always offered (not for gas cylinders). */}
+      {item.baseUnit !== "cylinder" || variants.length > 0 ? (
+        <Chips label="Variant" title="Variant" options={choiceOptions(variants)} value={variant} render={(v) => v || "None"} onChange={setVariant} />
+      ) : null}
+      {item.baseUnit !== "cylinder" || brands.length > 0 ? (
+        <Chips label="Brand" title="Brand" options={choiceOptions(brands)} value={brand} render={(v) => v || "None"} onChange={setBrand} />
       ) : null}
       {item.packSizes.length > 0 ? (
         <Chips
@@ -353,9 +390,12 @@ function useAmount(item: ItemInfo, initial: { variant?: string | null; quantity?
           )}
         </Field>
       )}
+      {splitTargets ? (
+        <SplitEditor id={`${id}-split`} draft={split} onChange={setSplit} properties={splitTargets} quantity={quantity} unit={item.baseUnit} />
+      ) : null}
     </>
   );
-  return { quantity, payload, fields };
+  return { quantity, payload, fields, problem };
 }
 
 function ShopSelect({
@@ -412,13 +452,15 @@ function PlanDialog({
   const add = useMutation(api.shoppingList.add);
   const update = useMutation(api.shoppingList.update);
   const remove = useMutation(api.shoppingList.remove);
-  const amount = useAmount(item, row ?? {});
+  const splitTargets = useQuery(api.entries.splitTargets, {});
+  const amount = useAmount(item, row ?? {}, scope.kind === "shared" ? (splitTargets ?? []) : null);
   const [shopId, setShopId] = useState<string>(row?.shopId ?? initial?.shopId ?? "");
   const [priceText, setPriceText] = useState(row?.expectedUnitPricePaise != null ? String(row.expectedUnitPricePaise / 100) : "");
   const [busy, setBusy] = useState(false);
   const expected = priceText.trim() ? rupeesToPaise(priceText) : undefined;
   const save = async () => {
     if (amount.quantity === null) return toast.error("Enter how much is needed.");
+    if (amount.problem) return toast.error(amount.problem);
     if (expected === null) return toast.error("Enter the expected price in rupees, or leave it empty.");
     setBusy(true);
     try {
@@ -492,6 +534,7 @@ function BuyMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog;
   const [saving, setSaving] = useState(false);
   const untick = useMutation(api.shoppingList.untick);
   const toBuy = list.rows.filter((r) => !r.bought);
+  const propertyNames = usePropertyNames();
   const bought = list.rows.filter((r) => r.bought);
   if (list.rows.length === 0)
     return <EmptyState title="Nothing to buy" description="Switch to List to add the items you need." />;
@@ -521,7 +564,9 @@ function BuyMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog;
                         <span className="flex min-w-0 flex-col">
                           <span className="font-medium">
                             {row.itemName}
-                            {row.variant ? <span className="font-normal text-foreground-secondary"> · {row.variant}</span> : null}
+                            {[row.variant, row.brand].filter(Boolean).length > 0 ? (
+                              <span className="font-normal text-foreground-secondary"> · {[row.variant, row.brand].filter(Boolean).join(" · ")}</span>
+                            ) : null}
                           </span>
                           <span className="tabular text-sm text-foreground-secondary">
                             {plannedText(row)}
@@ -587,13 +632,18 @@ function BuyMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog;
                           <span className="flex min-w-0 flex-col">
                             <span className="font-medium">
                               {row.itemName}
-                              {row.bought!.variant ? <span className="font-normal text-foreground-secondary"> · {row.bought!.variant}</span> : null}
+                              {[row.bought!.variant, row.bought!.brand].filter(Boolean).length > 0 ? (
+                                <span className="font-normal text-foreground-secondary"> · {[row.bought!.variant, row.bought!.brand].filter(Boolean).join(" · ")}</span>
+                              ) : null}
                             </span>
                             <span className="tabular text-sm text-foreground-secondary">
                               {formatQuantity(row.bought!.quantity, row.baseUnit)} · {formatPaise(row.bought!.totalPaise)} ·{" "}
                               {formatUnitPrice(row.bought!.unitPricePaise, row.baseUnit)}
                               {row.bought!.quantity !== row.quantity ? ` (planned ${formatQuantity(row.quantity, row.baseUnit)})` : ""}
                             </span>
+                            {row.bought!.split.length > 0 ? (
+                              <span className="tabular text-sm text-foreground-secondary">Split: {splitText(row.bought!.split, row.baseUnit, propertyNames)}</span>
+                            ) : null}
                           </span>
                         </button>
                         <Button
@@ -627,7 +677,7 @@ function BuyMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog;
         )}
       </section>
 
-      {ticking ? <TickDialog key={ticking.rowId} row={ticking} catalog={catalog} onClose={() => setTicking(null)} /> : null}
+      {ticking ? <TickDialog key={ticking.rowId} row={ticking} catalog={catalog} shared={scope.kind === "shared"} onClose={() => setTicking(null)} /> : null}
       {moving ? <MoveDialog key={moving.rowId} row={moving} catalog={catalog} onClose={() => setMoving(null)} /> : null}
       {saving ? <SaveDialog list={list} scope={scope} onClose={() => setSaving(false)} /> : null}
     </>
@@ -635,11 +685,12 @@ function BuyMode({ list, catalog, scope, sort }: { list: List; catalog: Catalog;
 }
 
 /** Tick an item off (or change what was bought): quantity, variant, shop and the amount paid. */
-function TickDialog({ row, catalog, onClose }: { row: Row; catalog: Catalog; onClose: () => void }) {
+function TickDialog({ row, catalog, shared, onClose }: { row: Row; catalog: Catalog; shared: boolean; onClose: () => void }) {
   const tick = useMutation(api.shoppingList.tick);
-  const item: ItemInfo = { itemId: row.itemId, name: row.itemName, baseUnit: row.baseUnit, packSizes: row.packSizes, variants: row.variants };
+  const item: ItemInfo = { itemId: row.itemId, name: row.itemName, baseUnit: row.baseUnit, packSizes: row.packSizes, variants: row.variants, brands: row.brands };
   const start = row.bought ?? row;
-  const amount = useAmount(item, start);
+  const splitTargets = useQuery(api.entries.splitTargets, {});
+  const amount = useAmount(item, start, shared ? (splitTargets ?? []) : null);
   const [shopId, setShopId] = useState<string>(row.bought?.shopId ?? row.shopId ?? "");
   // The price is asked per unit (per kg, per litre…); the total is worked out from the quantity.
   const [priceText, setPriceText] = useState(row.bought ? String(row.bought.unitPricePaise / 100) : "");
@@ -659,6 +710,7 @@ function TickDialog({ row, catalog, onClose }: { row: Row; catalog: Catalog; onC
           onSubmit={async (e) => {
             e.preventDefault();
             if (amount.quantity === null) return toast.error("Enter how much was bought.");
+            if (amount.problem) return toast.error(amount.problem);
             if (!pricePaise) return toast.error(`Enter the price per ${unitName}.`);
             if (!totalPaise) return toast.error("The total comes to zero. Check the quantity and price.");
             if (!shopId) return toast.error("Choose the shop.");
@@ -733,6 +785,8 @@ function MoveDialog({ row, catalog, onClose }: { row: Row; catalog: Catalog; onC
                 await update({
                   rowId: row.rowId,
                   variant: row.variant ?? undefined,
+                  brand: row.brand ?? undefined,
+                  split: row.split.length > 0 ? row.split : undefined,
                   ...(row.packLabel ? { packLabel: row.packLabel, packCount: row.packCount ?? 0 } : { quantity: row.quantity }),
                   shopId: (shopId || undefined) as Id<"shops"> | undefined,
                   expectedUnitPricePaise: row.expectedUnitPricePaise ?? undefined,

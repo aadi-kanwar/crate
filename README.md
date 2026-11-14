@@ -57,6 +57,13 @@ own Convex project**, Tailwind 4 with MealSync's tokens and components
   or **merges** it into the item/shop it duplicates (every purchase moves
   over, the duplicate's name becomes an "other name", then it is removed).
 - Archived items and shops are hidden when entering but keep their history.
+- **Brands:** each item can list preferred brands, chosen like variants.
+  Variants and brands always offer **None** and **Loose**.
+- **Packet** unit: items counted in packets keep what one packet holds
+  (e.g. 200 g); prices are per packet. An earlier price can also be given
+  as "₹55 for a 500 g packet" for an item counted in kg.
+- **Delete** (admin, in the item's Edit window): only items never bought;
+  bought items are archived instead so their history stays.
 
 ## Shopping list
 
@@ -81,7 +88,10 @@ property uses its list; everyone uses the Shared list; admins use all).
 
 - An entry is one trip to one shop with one or more items. It's for a
   property (the one chosen at the top) or, when ticked, **Shared** (bought
-  for the whole organisation; never split across properties).
+  for the whole organisation). Each Shared item (on an entry or the Shared
+  shopping list) can be **split between properties by quantity**; the parts
+  must add up. A property's numbers then include its share (amount in
+  proportion); "Shared" keeps only what wasn't split; "All" is unchanged.
 - Each line: item, optional variant, quantity (directly, or as "4 × 500 ml
   packet"), and the total paid. Crate works out and stores the price per
   unit.

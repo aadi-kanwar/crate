@@ -24,11 +24,16 @@ import { appError } from "./lib/errors";
 import {
   memberMutation,
   memberQuery,
+  organizationProperties,
   requireProperty,
   type MemberViewer,
 } from "./lib/functions";
+import { vSplit, type Split } from "./lib/validators";
 import {
   checkPrice,
+  isAllowedChoice,
+  splitProblem,
+  tidyQuantity,
   EDIT_WINDOW_MS,
   lineQuantity,
   MAX_LINE_PAISE,
@@ -54,10 +59,13 @@ export type Scope = Infer<typeof vScope>;
 export const vLineInput = v.object({
   itemId: v.id("items"),
   variant: v.optional(v.string()),
+  brand: v.optional(v.string()),
   /** Quantity in the item's base unit; leave out when using a pack size. */
   quantity: v.optional(v.number()),
   packLabel: v.optional(v.string()),
   packCount: v.optional(v.number()),
+  /** Shared entries only: the quantity for each property (adds up to the quantity). */
+  split: v.optional(vSplit),
   totalPaise: v.number(),
 });
 export type LineInput = Infer<typeof vLineInput>;
@@ -108,6 +116,8 @@ export function resolveScope(member: MemberViewer, scope: Scope) {
 type ResolvedLine = {
   item: Doc<"items">;
   variant?: string;
+  brand?: string;
+  split?: Split;
   quantity: number;
   packLabel?: string;
   packCount?: number;
@@ -115,12 +125,40 @@ type ResolvedLine = {
   unitPricePaise: number;
 };
 
+/**
+ * A Shared line's split between properties: only on Shared entries, only
+ * the organisation's properties, parts adding up to the quantity. Parts of
+ * zero are dropped; an empty split means "not split".
+ */
+export function checkSplit(
+  split: Split | undefined,
+  quantity: number,
+  allowed: readonly Id<"properties">[] | null,
+  where: string,
+): Split | undefined {
+  if (split === undefined || split.length === 0) return undefined;
+  if (allowed === null) throw appError("INVALID_INPUT", `${where}: only Shared purchases can be split between properties.`);
+  if (split.some((s) => !allowed.includes(s.propertyId))) throw appError("INVALID_INPUT", `${where}: that property wasn't found.`);
+  const problem = splitProblem(split, quantity);
+  if (problem) throw appError("INVALID_INPUT", `${where}: ${problem}`);
+  const parts = split.filter((s) => s.quantity > 0).map((s) => ({ propertyId: s.propertyId, quantity: tidyQuantity(s.quantity) }));
+  return parts.length > 0 ? parts : undefined;
+}
+
+/** The properties a Shared entry's lines can be split between (all of the organisation's); null for a property entry. */
+export async function splitPropertiesFor(ctx: Db, organizationId: Id<"organizations">, scopeKey: string) {
+  if (scopeKey !== SHARED) return null;
+  return (await organizationProperties(ctx, organizationId)).map((p) => p._id);
+}
+
 /** Checks and computes every line. `existing` lines (when editing) may keep archived items or retired variants. */
 async function resolveLines(
   ctx: Db,
   organizationId: Id<"organizations">,
   inputs: readonly LineInput[],
   existing: readonly Doc<"entryLines">[] = [],
+  /** For a Shared entry: the organisation's properties a line may be split between. Null: no splits. */
+  splitProperties: readonly Id<"properties">[] | null = null,
 ): Promise<ResolvedLine[]> {
   if (inputs.length === 0) throw appError("INVALID_INPUT", "Add at least one item.");
   if (inputs.length > MAX_LINES)
@@ -135,20 +173,22 @@ async function resolveLines(
     if (item.archived && wasHere.length === 0)
       throw appError("INVALID_INPUT", `${where}: "${item.name}" is archived.`);
     const variant = input.variant?.trim() || undefined;
-    if (
-      variant !== undefined &&
-      !item.variants.includes(variant) &&
-      !wasHere.some((l) => l.variant === variant)
-    )
+    if (!isAllowedChoice(variant, item.variants) && !wasHere.some((l) => l.variant === variant))
       throw appError("INVALID_INPUT", `${where}: "${variant}" isn't a variant of ${item.name}.`);
+    const brand = input.brand?.trim() || undefined;
+    if (!isAllowedChoice(brand, item.brands ?? []) && !wasHere.some((l) => l.brand === brand))
+      throw appError("INVALID_INPUT", `${where}: "${brand}" isn't a brand of ${item.name}.`);
     const quantity = lineQuantity(input, item.packSizes);
     if (quantity === null)
       throw appError("INVALID_INPUT", `${where}: enter a quantity above zero for ${item.name}.`);
+    const split = checkSplit(input.split, quantity.quantity, splitProperties, `${where} (${item.name})`);
     if (!Number.isSafeInteger(input.totalPaise) || input.totalPaise <= 0 || input.totalPaise > MAX_LINE_PAISE)
       throw appError("INVALID_INPUT", `${where}: enter the amount paid for ${item.name}.`);
     out.push({
       item,
       variant,
+      brand,
+      split,
       ...quantity,
       totalPaise: input.totalPaise,
       unitPricePaise: unitPricePaise(input.totalPaise, quantity.quantity),
@@ -224,9 +264,11 @@ async function insertLines(
       organizationId: entry.organizationId,
       itemId: line.item._id,
       variant: line.variant,
+      brand: line.brand,
       quantity: line.quantity,
       packLabel: line.packLabel,
       packCount: line.packCount,
+      split: entry.scopeKey === SHARED ? line.split : undefined,
       totalPaise: line.totalPaise,
       unitPricePaise: line.unitPricePaise,
       propertyId: entry.propertyId,
@@ -264,9 +306,11 @@ async function snapshot(ctx: Db, entry: Doc<"entries">) {
         item: (await ctx.db.get(l.itemId))?.name ?? "",
         itemId: l.itemId,
         variant: l.variant ?? null,
+        brand: l.brand ?? null,
         quantity: l.quantity,
         packLabel: l.packLabel ?? null,
         packCount: l.packCount ?? null,
+        split: l.split ?? null,
         totalPaise: l.totalPaise,
         unitPricePaise: l.unitPricePaise,
       })),
@@ -320,7 +364,7 @@ export async function insertEntry(
   const organizationId = member.organization._id;
   const { scopeKey, propertyId } = resolveScope(member, args.scope);
   await checkShop(ctx, organizationId, args.shopId);
-  const lines = await resolveLines(ctx, organizationId, args.lines);
+  const lines = await resolveLines(ctx, organizationId, args.lines, [], await splitPropertiesFor(ctx, organizationId, scopeKey));
   await requireConfirmed(ctx, lines, args.pricesConfirmed);
   const now = Date.now();
   const entryId = await ctx.db.insert("entries", {
@@ -383,7 +427,7 @@ export const update = memberMutation({
     const { scopeKey, propertyId } = resolveScope(member, args.scope);
     await checkShop(ctx, organizationId, args.shopId, entry.shopId);
     const oldLines = await linesOf(ctx, entry._id);
-    const lines = await resolveLines(ctx, organizationId, args.lines, oldLines);
+    const lines = await resolveLines(ctx, organizationId, args.lines, oldLines, await splitPropertiesFor(ctx, organizationId, scopeKey));
     await requireConfirmed(ctx, lines, args.pricesConfirmed, entry._id);
     let loggedAt = entry.loggedAt;
     if (args.loggedAt !== undefined) {
@@ -557,9 +601,17 @@ export const get = memberQuery({
             itemName: item?.name ?? "",
             baseUnit: item?.baseUnit ?? "piece",
             variant: l.variant ?? null,
+            brand: l.brand ?? null,
             quantity: l.quantity,
             packLabel: l.packLabel ?? null,
             packCount: l.packCount ?? null,
+            split: await Promise.all(
+              (l.split ?? []).map(async (part) => ({
+                propertyId: part.propertyId,
+                propertyName: (await ctx.db.get(part.propertyId))?.name ?? "",
+                quantity: part.quantity,
+              })),
+            ),
             totalPaise: l.totalPaise,
             unitPricePaise: l.unitPricePaise,
           };
@@ -567,4 +619,11 @@ export const get = memberQuery({
       ),
     };
   },
+});
+
+/** Every property of the organisation (names only), for splitting a Shared purchase between them. */
+export const splitTargets = memberQuery({
+  args: {},
+  handler: async (ctx) =>
+    (await organizationProperties(ctx, ctx.member.organization._id)).map((p) => ({ propertyId: p._id, name: p.name })),
 });

@@ -27,13 +27,14 @@ export const vRecordStatus = v.union(
 );
 
 /** The unit an item is counted in. Fixed per item; staff never choose units. */
-export const BASE_UNITS = ["kg", "litre", "piece", "dozen", "cylinder"] as const;
+export const BASE_UNITS = ["kg", "litre", "piece", "dozen", "cylinder", "packet"] as const;
 export const vBaseUnit = v.union(
   v.literal("kg"),
   v.literal("litre"),
   v.literal("piece"),
   v.literal("dozen"),
   v.literal("cylinder"),
+  v.literal("packet"),
 );
 export type BaseUnit = Infer<typeof vBaseUnit>;
 
@@ -66,6 +67,21 @@ export const vPackSize = v.object({
   quantity: v.number(), // in the item's base unit, e.g. 0.5
 });
 export type PackSize = Infer<typeof vPackSize>;
+
+/** For items counted in packets: what one packet holds (e.g. 200 g). Information only. */
+export const PACKET_SIZE_UNITS = ["g", "kg", "ml", "litre", "piece"] as const;
+export const vPacketSize = v.object({
+  amount: v.number(),
+  unit: v.union(v.literal("g"), v.literal("kg"), v.literal("ml"), v.literal("litre"), v.literal("piece")),
+});
+export type PacketSize = Infer<typeof vPacketSize>;
+
+/**
+ * How a Shared line is divided between properties, by quantity (in the
+ * item's unit). The parts add up to the line's quantity.
+ */
+export const vSplit = v.array(v.object({ propertyId: v.id("properties"), quantity: v.number() }));
+export type Split = Infer<typeof vSplit>;
 
 /**
  * A price known from before the item was bought through Crate (typed by

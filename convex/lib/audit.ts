@@ -19,6 +19,7 @@ export type AuditAction =
   | "item.updated"
   | "item.verified"
   | "item.merged"
+  | "item.deleted"
   | "shop.created"
   | "shop.updated"
   | "shop.verified"

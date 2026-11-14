@@ -5,8 +5,10 @@ import {
   vBaseUnit,
   vMemberRole,
   vPackSize,
+  vPacketSize,
   vRecordStatus,
   vReferencePrice,
+  vSplit,
   vRole,
   vShopType,
   vVerification,
@@ -103,6 +105,10 @@ export default defineSchema({
     aliases: v.array(v.string()),
     packSizes: v.array(vPackSize),
     variants: v.array(v.string()),
+    /** Preferred brands, chosen like variants (absent on older items: none). */
+    brands: v.optional(v.array(v.string())),
+    /** Items counted in packets: what one packet holds. */
+    packetSize: v.optional(vPacketSize),
     /** The shop it is usually bought from (pre-filled on shopping lists). */
     defaultShopId: v.optional(v.id("shops")),
     /** A price known from before Crate (optional); see vReferencePrice. */
@@ -165,9 +171,12 @@ export default defineSchema({
     organizationId: v.id("organizations"),
     itemId: v.id("items"),
     variant: v.optional(v.string()),
+    brand: v.optional(v.string()),
     quantity: v.number(), // in the item's base unit
     packLabel: v.optional(v.string()),
     packCount: v.optional(v.number()),
+    /** Shared lines only: how the quantity is divided between properties. */
+    split: v.optional(vSplit),
     totalPaise: v.number(),
     unitPricePaise: v.number(), // per base unit, rounded to the paisa
     // Denormalised for fast queries.
@@ -197,7 +206,10 @@ export default defineSchema({
     propertyId: v.optional(v.id("properties")),
     itemId: v.id("items"),
     variant: v.optional(v.string()),
+    brand: v.optional(v.string()),
     quantity: v.number(), // planned, in the item's base unit
+    /** Shared list only: planned division between properties. */
+    split: v.optional(vSplit),
     packLabel: v.optional(v.string()),
     packCount: v.optional(v.number()),
     shopId: v.optional(v.id("shops")), // where it is to be bought
@@ -214,6 +226,8 @@ export default defineSchema({
         packLabel: v.optional(v.string()),
         packCount: v.optional(v.number()),
         variant: v.optional(v.string()),
+        brand: v.optional(v.string()),
+        split: v.optional(vSplit),
         shopId: v.id("shops"),
         totalPaise: v.number(),
         unitPricePaise: v.number(),

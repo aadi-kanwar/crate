@@ -18,6 +18,7 @@ import { useQuery } from "@/lib/convex";
 import { friendlyError, parseAppError } from "@/lib/errors";
 import { formatDateTime, formatPaise, formatQuantity, formatUnitPrice, formatWhen } from "@/lib/format";
 import { EntryForm } from "./entry-form";
+import { splitText } from "./split-editor";
 
 /**
  * One entry: details and lines, with Edit and Delete while allowed
@@ -84,7 +85,9 @@ export function EntryDetail({
               <div className="flex items-baseline justify-between gap-3">
                 <span className="min-w-0">
                   <span className="font-medium">{l.itemName}</span>
-                  {l.variant ? <span className="text-foreground-secondary"> · {l.variant}</span> : null}
+                  {[l.variant, l.brand].filter(Boolean).length > 0 ? (
+                    <span className="text-foreground-secondary"> · {[l.variant, l.brand].filter(Boolean).join(" · ")}</span>
+                  ) : null}
                 </span>
                 <span className="tabular font-medium">{formatPaise(l.totalPaise)}</span>
               </div>
@@ -92,6 +95,9 @@ export function EntryDetail({
                 {l.packLabel ? `${l.packCount} × ${l.packLabel} = ` : ""}
                 {formatQuantity(l.quantity, l.baseUnit)} · {formatUnitPrice(l.unitPricePaise, l.baseUnit)}
               </span>
+              {l.split.length > 0 ? (
+                <span className="tabular text-sm text-foreground-secondary">Split: {splitText(l.split, l.baseUnit)}</span>
+              ) : null}
             </li>
           ))}
         </ul>

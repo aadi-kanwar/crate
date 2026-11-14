@@ -6,7 +6,7 @@ import { ArrowLeft, Check, Plus, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { rupeesToPaise, unitPricePaise, tidyQuantity, type PriceCheck } from "@convex/lib/purchases";
+import { choiceOptions, rupeesToPaise, unitPricePaise, tidyQuantity, type PriceCheck } from "@convex/lib/purchases";
 import { TIMEZONE } from "@convex/lib/time";
 import type { BaseUnit, PackSize } from "@convex/lib/validators";
 import { Banner } from "@/components/ui/banner";
@@ -24,13 +24,17 @@ import { formatPaise, formatQuantity, formatUnitPrice, parseDecimal } from "@/li
 import { UNIT_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { ItemPicker, ShopPicker, type Catalog, type CatalogItem } from "./pickers";
+import { SplitEditor, splitDraftFrom, splitDraftProblem, splitParts, type SplitDraft } from "./split-editor";
 
-type LineItem = Pick<CatalogItem, "itemId" | "name" | "baseUnit" | "packSizes" | "variants">;
+type LineItem = Pick<CatalogItem, "itemId" | "name" | "baseUnit" | "packSizes" | "variants" | "brands">;
 
 type DraftLine = {
   key: string;
   item: LineItem;
   variant: string;
+  brand: string;
+  /** Shared entries: how this line is divided between properties. */
+  split: SplitDraft;
   mode: "quantity" | "pack";
   quantityText: string;
   packLabel: string;
@@ -52,9 +56,11 @@ export type EntryInitial = {
     itemName: string;
     baseUnit: BaseUnit;
     variant: string | null;
+    brand: string | null;
     quantity: number;
     packLabel: string | null;
     packCount: number | null;
+    split: { propertyId: Id<"properties">; quantity: number }[];
     totalPaise: number;
   }[];
 };
@@ -88,6 +94,8 @@ function lineFromItem(item: LineItem): DraftLine {
     key: newKey(),
     item,
     variant: "",
+    brand: "",
+    split: splitDraftFrom(null),
     mode: item.packSizes.length > 0 ? "pack" : "quantity",
     quantityText: "",
     packLabel: item.packSizes[0]?.label ?? "",
@@ -106,6 +114,7 @@ function initialLines(initial: EntryInitial | undefined, catalog: Catalog): Draf
         ? [...packSizes, { label: l.packLabel, quantity: l.quantity / l.packCount }]
         : packSizes;
     const variants = known?.variants ?? [];
+    const brands = known?.brands ?? [];
     return {
       key: newKey(),
       item: {
@@ -114,8 +123,11 @@ function initialLines(initial: EntryInitial | undefined, catalog: Catalog): Draf
         baseUnit: known?.baseUnit ?? l.baseUnit,
         packSizes: withOldPack,
         variants: l.variant && !variants.includes(l.variant) ? [...variants, l.variant] : variants,
+        brands: l.brand && !brands.includes(l.brand) ? [...brands, l.brand] : brands,
       },
       variant: l.variant ?? "",
+      brand: l.brand ?? "",
+      split: splitDraftFrom(l.split),
       mode: l.packLabel ? "pack" : "quantity",
       quantityText: l.packLabel ? "" : String(l.quantity),
       packLabel: l.packLabel ?? withOldPack[0]?.label ?? "",
@@ -184,6 +196,8 @@ function LoadedForm({
   const create = useMutation(api.entries.create);
   const update = useMutation(api.entries.update);
   const [shared, setShared] = useState(initial?.scope.kind === "shared");
+  // Every property, for splitting a Shared entry between them.
+  const splitTargets = useQuery(api.entries.splitTargets, {});
   const [propertyId, setPropertyId] = useState<Id<"properties"> | null>(
     initial?.scope.kind === "property" ? initial.scope.propertyId : defaultPropertyId,
   );
@@ -213,6 +227,11 @@ function LoadedForm({
   if (shopId === null) problems.push("Choose the shop.");
   if (lines.length === 0) problems.push("Add at least one item.");
   if (computed.some((c) => !c.valid)) problems.push("Fill in the quantity and amount paid for every item.");
+  if (shared)
+    lines.forEach((line, i) => {
+      const problem = splitDraftProblem(line.split, computed[i].quantity);
+      if (problem) problems.push(`${line.item.name}: ${problem}`);
+    });
 
   const setLine = (key: string, change: Partial<DraftLine>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...change } : l)));
@@ -221,6 +240,9 @@ function LoadedForm({
   const payloadLines = lines.map((line, i) => ({
     itemId: line.item.itemId,
     variant: line.variant || undefined,
+    brand: line.brand || undefined,
+    // Only Shared entries are split.
+    split: shared && line.split.on ? splitParts(line.split) : undefined,
     ...(line.mode === "pack"
       ? { packLabel: line.packLabel, packCount: parseDecimal(line.packCountText) ?? 0 }
       : { quantity: computed[i].quantity ?? 0 }),
@@ -334,6 +356,7 @@ function LoadedForm({
             line={line}
             computed={computed[i]}
             showErrors={showErrors}
+            splitProperties={shared ? (splitTargets ?? []) : null}
             onChange={(change) => setLine(line.key, change)}
             onRemove={() => setLines((prev) => prev.filter((l) => l.key !== line.key))}
             onNext={() => setPicking(true)}
@@ -405,7 +428,10 @@ function LineCard({
   onRemove,
   onNext,
   firstInputRef,
+  splitProperties,
 }: {
+  /** For a Shared entry: every property, so the line can be split. Null otherwise. */
+  splitProperties: readonly { propertyId: Id<"properties">; name: string }[] | null;
   index: number;
   line: DraftLine;
   computed: ReturnType<typeof computeLine>;
@@ -436,13 +462,25 @@ function LineCard({
           </Button>
         </div>
 
-        {line.item.variants.length > 0 ? (
+        {/* Variants and brands always offer None and Loose (not for gas cylinders). */}
+        {unit !== "cylinder" || line.item.variants.length > 0 ? (
           <Chips
             label="Variant"
-            options={["", ...line.item.variants]}
+            options={choiceOptions(line.item.variants)}
             value={line.variant}
-            render={(v) => v || "Any"}
+            render={(v) => v || "None"}
             onChange={(variant) => onChange({ variant })}
+            title="Variant"
+          />
+        ) : null}
+        {unit !== "cylinder" || line.item.brands.length > 0 ? (
+          <Chips
+            label="Brand"
+            options={choiceOptions(line.item.brands)}
+            value={line.brand}
+            render={(v) => v || "None"}
+            onChange={(brand) => onChange({ brand })}
+            title="Brand"
           />
         ) : null}
 
@@ -507,6 +545,16 @@ function LineCard({
             )}
           </Field>
         </div>
+        {splitProperties ? (
+          <SplitEditor
+            id={`${id}-split`}
+            draft={line.split}
+            onChange={(split) => onChange({ split })}
+            properties={splitProperties}
+            quantity={computed.quantity}
+            unit={unit}
+          />
+        ) : null}
         <p className="tabular text-sm text-foreground-secondary" aria-live="polite">
           {computed.quantity !== null ? formatQuantity(computed.quantity, unit) : "—"}
           {computed.unitPricePaise !== null ? (
@@ -527,15 +575,19 @@ export function Chips<V extends string>({
   value,
   render,
   onChange,
+  title,
 }: {
   label: string;
   options: readonly V[];
   value: V;
   render: (value: V) => string;
   onChange: (value: V) => void;
+  /** A small heading shown before the chips. */
+  title?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-2">
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-2">
+      {title ? <span className="w-full text-xs font-medium text-foreground-secondary">{title}</span> : null}
       {options.map((option) => (
         <button
           key={option}
@@ -616,7 +668,9 @@ function Review({
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="min-w-0">
                     <span className="font-medium">{line.item.name}</span>
-                    {line.variant ? <span className="text-foreground-secondary"> · {line.variant}</span> : null}
+                    {[line.variant, line.brand].filter(Boolean).length > 0 ? (
+                      <span className="text-foreground-secondary"> · {[line.variant, line.brand].filter(Boolean).join(" · ")}</span>
+                    ) : null}
                   </span>
                   <span className="tabular font-medium">{formatPaise(c.totalPaise ?? 0)}</span>
                 </div>
