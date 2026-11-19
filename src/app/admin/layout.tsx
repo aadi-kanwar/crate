@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { useEffect } from "react";
 import { OrganizationSetup } from "@/components/admin/organization-setup";
 import { AppFrame } from "@/components/app/app-frame";
@@ -69,7 +70,10 @@ export default function AdminLayout({
                 <PropertyPicker />
                 {/* On phones, Log out is in the bottom bar's More menu. */}
                 <span className="hidden md:block">
-                  <SignOutButton />
+                  <span className="flex items-center gap-1">
+                    <ThemeToggle />
+                    <SignOutButton />
+                  </span>
                 </span>
               </div>
             </div>
@@ -81,7 +85,12 @@ export default function AdminLayout({
             items={ADMIN_NAV.filter((item) => item.mobile !== false)}
             more={{
               items: ADMIN_NAV.filter((item) => item.mobile === false),
-              footer: <SignOutButton variant="ghost" full />,
+              footer: (
+                <>
+                  <ThemeToggle full />
+                  <SignOutButton variant="ghost" full />
+                </>
+              ),
             }}
           />
         }

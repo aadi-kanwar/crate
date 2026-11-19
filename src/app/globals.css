@@ -148,6 +148,62 @@
   }
 }
 
+/*
+ * Dark mode. The page follows the phone's or computer's setting unless the
+ * person picked Light or Dark (the theme button); a tiny script in the root
+ * layout sets <html data-theme="light|dark"> before the first paint. Only the
+ * semantic colours change: components never need to know. Text colours keep
+ * >= 4.5:1 on their backgrounds, as in light mode.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Warm darks: deep brown-black page, slightly lifted cards */
+  --color-background: #161513;
+  --color-surface: #1f1d1a;
+  --color-subtle: #26231f;
+  --color-muted: #2f2b26;
+  --color-foreground: #f3efe7;
+  --color-foreground-secondary: #c9c1b4;
+  --color-foreground-muted: #a39a8b;
+  --color-border: #3a352f;
+  --color-border-strong: #4d473f;
+  --color-disabled: #6b645a;
+  --color-inverse: #5a534a;
+
+  /* Accent: the same teal, lifted so it reads on dark */
+  --color-primary: #6fa89c;
+  --color-primary-hover: #82b8ac;
+  --color-primary-active: #95c5ba;
+  --color-primary-foreground: #10201d;
+  --color-primary-subtle: #1c2e2b;
+  --color-primary-subtle-border: #2f4a45;
+  --color-primary-text: #8cc2b6;
+  --color-primary-soft: #7fa9a0;
+  --color-ring: #8cc2b6;
+
+  /* Semantic */
+  --color-success: #8cc2b6;
+  --color-success-subtle: #1c2e2b;
+  --color-success-border: #2f4a45;
+  --color-warning: #e8b75a;
+  --color-warning-subtle: #2e2512;
+  --color-warning-border: #5a4720;
+  --color-danger: #c0392f;
+  --color-danger-hover: #a8322a;
+  --color-danger-text: #f28b82;
+  --color-danger-subtle: #33191a;
+  --color-danger-border: #5c2b29;
+  --color-info: #8ab4f0;
+  --color-info-subtle: #172338;
+  --color-info-border: #2b4266;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 8px 24px -6px rgb(0 0 0 / 0.6);
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;

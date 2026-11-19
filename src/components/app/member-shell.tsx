@@ -6,6 +6,7 @@ import { AppFrame } from "./app-frame";
 import { Brand } from "./brand";
 import { MemberPropertyPicker } from "./member-property";
 import { SignOutButton } from "./session";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 
 /**
  * Frame for manager / kitchen staff screens (phone-first): app name and
@@ -25,7 +26,14 @@ export function MemberShell({
         <header className="border-b border-border bg-surface">
           <div className="mx-auto flex h-14 max-w-lg items-center justify-between gap-3 px-4">
             <Brand />
-            {nav ? <MemberPropertyPicker /> : <SignOutButton />}
+            {nav ? (
+              <MemberPropertyPicker />
+            ) : (
+              <span className="flex items-center gap-1">
+                <ThemeToggle />
+                <SignOutButton />
+              </span>
+            )}
           </div>
         </header>
       }
